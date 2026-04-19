@@ -23,20 +23,24 @@ MESSAGES: Dict[str, Dict[str, str]] = {
     },
     "setup_guide": {
         "en": (
-            "<b>Database channel setup guide</b>\n\n"
+            "Database channel setup guide\n\n"
             "1. Create a private Telegram channel for your own bot data.\n"
-            "2. Add this bot and the linked user account into that channel.\n"
-            "3. Make sure the bot can post in that channel.\n"
-            "4. Use <b>Raw Data Bot</b> to get the channel ID.\n"
-            "5. Send the channel ID here. Example: <code>-1001234567890</code>"
+            "2. Add this bot into that channel and grant admin with Post Messages permission.\n"
+            "3. Linked repost account: {linked_account}\n"
+            "4. Add that repost account into the same channel.\n"
+            "5. Use @RawDataBot to get the channel ID.\n"
+            "6. Send the channel ID here.\n"
+            "   Example: `-1001234567890`"
         ),
         "my": (
-            "<b>Database channel setup guide</b>\n\n"
-            "1. သင့်အတွက် သီးသန့် private Telegram channel တစ်ခုဖန်တီးပါ။\n"
-            "2. အဲဒီ channel ထဲကို ဒီ bot နဲ့ linked user account ကို ထည့်ပါ။\n"
-            "3. Bot က channel ထဲ post တင်လို့ရအောင် သေချာလုပ်ပါ။\n"
-            "4. <b>Raw Data Bot</b> နဲ့ channel ID ကိုယူပါ။\n"
-            "5. ပြီးရင် ဒီမှာ channel ID ပို့ပါ။ ဥပမာ <code>-1001234567890</code>"
+            "Database channel setup guide\n\n"
+            "1. သင့်အတွက် သီးသန့် private Telegram channel တစ်ခု ဖန်တီးပါ။\n"
+            "2. ဒီ bot ကို အဲဒီ channel ထဲ add ပြီး admin ပေးကာ Post Messages permission ကို ဖွင့်ပေးပါ။\n"
+            "3. Linked repost account: {linked_account}\n"
+            "4. အဲဒီ repost account ကိုလည်း အဲဒီ channel ထဲ add ပေးပါ။\n"
+            "5. @RawDataBot နဲ့ channel ID ကိုယူပါ။\n"
+            "6. ပြီးရင် ဒီမှာ channel ID ပို့ပါ။\n"
+            "   ဥပမာ `-1001234567890`"
         ),
     },
     "setup_saved": {
