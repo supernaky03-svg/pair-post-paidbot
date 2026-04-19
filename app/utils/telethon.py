@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -23,6 +22,26 @@ async def run_with_floodwait(coro_factory, *args, **kwargs):
 async def safe_get_entity(entity_like: Any):
     runtime = get_runtime()
     return await run_with_floodwait(runtime.telethon.get_entity, entity_like)
+
+
+async def get_linked_account_label() -> str:
+    runtime = get_runtime()
+    me = await run_with_floodwait(runtime.telethon.get_me)
+
+    username = getattr(me, "username", None)
+    first_name = getattr(me, "first_name", "") or ""
+    last_name = getattr(me, "last_name", "") or ""
+    full_name = " ".join(part for part in [first_name, last_name] if part).strip()
+
+    if username:
+        if full_name:
+            return f"@{username} ({full_name})"
+        return f"@{username}"
+
+    if full_name:
+        return f"{full_name} | ID: {me.id}"
+
+    return f"ID: {me.id}"
 
 
 async def safe_get_message(chat: Any, msg_id: int):
