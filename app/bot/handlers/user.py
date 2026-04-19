@@ -54,8 +54,8 @@ from ...states import (
     SetupStates,
 )
 from ...utils.parsing import ParseError, parse_id_or_all, parse_pair_number, parse_scan_amount
+from ...utils.telethon import get_linked_account_label
 from ...core.runtime import get_runtime, list_user_pairs
-
 router = Router()
 
 
@@ -91,6 +91,11 @@ async def _cancel_callback(callback: CallbackQuery, state: FSMContext, user: Use
 
 async def _require_user(message: Message) -> UserRecord:
     return await ensure_user_profile(message.from_user)
+
+
+async def _setup_guide_text(user: UserRecord) -> str:
+    linked_account = await get_linked_account_label()
+    return t(user, "setup_guide", linked_account=linked_account)
 
 
 async def _require_active_user(message: Message, state: FSMContext) -> UserRecord | None:
