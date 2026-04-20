@@ -311,16 +311,31 @@ def _menu_action(text: str | None) -> str | None:
 @router.message(Command("start"))
 async def start_cmd(message: Message, state: FSMContext) -> None:
     await state.clear()
+
     user = await access_service.ensure_user(message.from_user)
     language = _lang(user)
+
+    # Bootstrap admin bypass:
+    # ADMIN_IDS ထဲက user က OTP မလိုဘူး
+    if _is_admin(message.from_user.id):
+        await message.answer(build_tutorial(language), reply_markup=main_menu(language))
+        return
+
     if user.is_banned:
         await message.answer(t(language, "access_blocked"))
         return
+
     if user.status != "activated":
         await state.set_state(OtpStates.waiting_otp)
-        await state.update_data(last_activity=_now_ts(), current_prompt_key="otp_required", current_markup_payload={"type": "language"}, history=[])
+        await state.update_data(
+            last_activity=_now_ts(),
+            current_prompt_key="otp_required",
+            current_markup_payload={"type": "language"},
+            history=[],
+        )
         await message.answer(t(language, "otp_required"), reply_markup=language_keyboard())
         return
+
     await message.answer(build_tutorial(language), reply_markup=main_menu(language))
 
 
