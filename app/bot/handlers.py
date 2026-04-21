@@ -723,7 +723,7 @@ async def admin_joined_sources(message: Message) -> None:
 
 @router.callback_query()
 async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
-    user = await access_service.ensure_user(call.from_user)
+    user = user or await access_service.ensure_user(call.from_user)
     language = _lang(user)
 
     data = call.data or ""
@@ -757,11 +757,9 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             else:
                 await _remove_main_menu(call)
             await _show_step(call, state, t(new_language, "language_set"), reply_markup=None, reset_panel=True)
-        await call.answer()
         return
 
     if current_state and not await _ensure_timeout(call, state, language):
-        await call.answer()
         return
 
     if data.startswith("restore:"):
@@ -777,7 +775,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             await _restore_main_menu(call, language)
         await user_repo.clear_restore_choice(call.from_user.id)
         await state.clear()
-        await call.answer()
         return
 
     if not await _ensure_access_callback(call, state, user=user):
