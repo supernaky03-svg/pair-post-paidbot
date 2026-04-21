@@ -725,12 +725,13 @@ async def admin_joined_sources(message: Message) -> None:
         return
     await message.answer("\n".join(f"{item.source_input} | refs={item.active_pair_reference_count}" for item in items))
 
-        
 @router.callback_query()
 async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
     user = await access_service.ensure_user(call.from_user)
     language = _lang(user)
+
     data = call.data or ""
+
     current_state = await state.get_state()
 
     if data.startswith("lang:"):
@@ -739,6 +740,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
         state_data = await state.get_data()
         current_user = await user_repo.get(call.from_user.id)
         is_activated = bool(current_user and current_user.status == "activated" and not current_user.is_banned)
+
         state_data = await state.get_data()
         if await state.get_state() and state_data.get("current_prompt_key"):
             prompt_key = state_data["current_prompt_key"]
@@ -759,9 +761,11 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             else:
                 await _remove_main_menu(call)
             await _show_step(call, state, t(new_language, "language_set"), reply_markup=None, reset_panel=True)
-            return
+        await call.answer()
+        return
 
     if current_state and not await _ensure_timeout(call, state, language):
+        await call.answer()
         return
 
     if data.startswith("restore:"):
@@ -777,14 +781,28 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             await _restore_main_menu(call, language)
         await user_repo.clear_restore_choice(call.from_user.id)
         await state.clear()
+        await call.answer()
         return
 
-    if not await _ensure_access_callback(call, state):
+    if not await _ensure_access_callback(call, state, user=user):
         return
+
+    late_alert_callback = (
+        (data.startswith("add_target_admin:") and current_state == AddPairStates.waiting_confirm.state)
+        or
+        (data.startswith("edit_target_admin:") and current_state == EditTargetStates.waiting_confirm.state)
+    )
+
+    if not late_alert_callback:
+        try:
+            await call.answer()
+        except Exception:
+            pass
 
     if data.endswith(":back") or data in {"kw_action:back", "ads_action:back"}:
         await _go_back(call, state, language, call.from_user.id)
         return
+
     if data.endswith(":cancel") or data in {"kw_action:cancel", "ads_action:cancel"}:
         await _cancel_flow(call, state, language, call.from_user.id)
         return
