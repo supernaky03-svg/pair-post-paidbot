@@ -461,8 +461,8 @@ async def _ensure_access_message(message: Message, state: FSMContext):
     return None
 
 
-async def _ensure_access_callback(call: CallbackQuery, state: FSMContext):
-    user = await access_service.ensure_user(call.from_user)
+async def _ensure_access_callback(call: CallbackQuery, state: FSMContext, user=None):
+    user = user or await access_service.ensure_user(call.from_user)
     if not await _ensure_timeout(call, state, _lang(user)):
         await call.answer()
         return None
@@ -477,7 +477,12 @@ async def _ensure_access_callback(call: CallbackQuery, state: FSMContext):
         await _remove_main_menu(call)
         await _show_step(call, state, reason, reply_markup=language_keyboard(), reset_panel=True)
         await state.set_state(OtpStates.waiting_otp)
-        await state.update_data(last_activity=_now_ts(), current_prompt_key="otp_required", current_markup_payload={"type": "language"}, history=[])
+        await state.update_data(
+            last_activity=_now_ts(),
+            current_prompt_key="otp_required",
+            current_markup_payload={"type": "language"},
+            history=[],
+        )
         await call.answer()
         return None
 
@@ -720,7 +725,7 @@ async def admin_joined_sources(message: Message) -> None:
         return
     await message.answer("\n".join(f"{item.source_input} | refs={item.active_pair_reference_count}" for item in items))
 
-
+        
 @router.callback_query()
 async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
     user = await access_service.ensure_user(call.from_user)
@@ -754,11 +759,9 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             else:
                 await _remove_main_menu(call)
             await _show_step(call, state, t(new_language, "language_set"), reply_markup=None, reset_panel=True)
-        await call.answer()
-        return
+            return
 
     if current_state and not await _ensure_timeout(call, state, language):
-        await call.answer()
         return
 
     if data.startswith("restore:"):
@@ -774,7 +777,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             await _restore_main_menu(call, language)
         await user_repo.clear_restore_choice(call.from_user.id)
         await state.clear()
-        await call.answer()
         return
 
     if not await _ensure_access_callback(call, state):
@@ -782,11 +784,9 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
 
     if data.endswith(":back") or data in {"kw_action:back", "ads_action:back"}:
         await _go_back(call, state, language, call.from_user.id)
-        await call.answer()
         return
     if data.endswith(":cancel") or data in {"kw_action:cancel", "ads_action:cancel"}:
         await _cancel_flow(call, state, language, call.from_user.id)
-        await call.answer()
         return
 
     if data.startswith("add_post:") and current_state == AddPairStates.waiting_post_rule.state:
@@ -799,7 +799,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             markup_payload={"type": "add_forward_rule"},
         )
         await _show_step(call, state, t(language, "rule_forward_explain"), reply_markup=rule_keyboard("add_forward", language))
-        await call.answer()
         return
 
     if data.startswith("add_forward:") and current_state == AddPairStates.waiting_forward_rule.state:
@@ -833,7 +832,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
         )
         await state.update_data(summary_text=summary)
         await _show_step(call, state, warning_text, reply_markup=target_admin_keyboard("add_target_admin", language))
-        await call.answer()
         return
 
     if data.startswith("add_target_admin:") and current_state == AddPairStates.waiting_confirm.state:
@@ -871,7 +869,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 panel_text=summary,
             )
             await _show_step(call, state, summary, reply_markup=confirm_keyboard("pair_confirm", language))
-        await call.answer()
         return
 
     if data.startswith("pair_confirm:") and current_state == AddPairStates.waiting_confirm.state:
@@ -895,7 +892,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 await _show_step(call, state, t(language, "pair_created"), reply_markup=None)
             await state.clear()
             await _restore_main_menu(call, language)
-        await call.answer()
         return
 
     if data.startswith("pair_delete:") and current_state == DeletePairStates.waiting_confirm.state:
@@ -910,7 +906,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 await _show_step(call, state, t(language, "pair_deleted"), reply_markup=None)
             await state.clear()
             await _restore_main_menu(call, language)
-        await call.answer()
         return
 
     if data.startswith("edit_source_confirm:") and current_state == EditSourceStates.waiting_confirm.state:
@@ -926,7 +921,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 await _show_step(call, state, t(language, "pair_updated"), reply_markup=None)
             await state.clear()
             await _restore_main_menu(call, language)
-        await call.answer()
         return
 
     if data.startswith("edit_target_admin:") and current_state == EditTargetStates.waiting_confirm.state:
@@ -964,7 +958,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 panel_text=summary,
             )
             await _show_step(call, state, summary, reply_markup=confirm_keyboard("edit_target_confirm", language))
-        await call.answer()
         return
 
     if data.startswith("edit_target_confirm:") and current_state == EditTargetStates.waiting_confirm.state:
@@ -980,7 +973,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 await _show_step(call, state, t(language, "pair_updated"), reply_markup=None)
             await state.clear()
             await _restore_main_menu(call, language)
-        await call.answer()
         return
 
     if data.startswith("kw_pair:") and current_state == KeywordStates.waiting_pair.state:
@@ -989,7 +981,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             pair = await pair_repo.get(call.from_user.id, int(choice))
             if not pair or not pair.active:
                 await _show_step(call, state, t(language, "pair_not_found"), reply_markup=None)
-                await call.answer()
                 return
             await state.update_data(pair_no=pair.pair_no)
             ban_values = ", ".join(pair.keyword_values) if pair.keyword_mode == "ban" and pair.keyword_values else "-"
@@ -1009,7 +1000,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 ban_values=ban_values,
                 post_values=post_values,
             ),reply_markup=keyword_action_keyboard(language),)
-        await call.answer()
         return
 
     if data.startswith("kw_action:") and current_state == KeywordStates.waiting_action.state:
@@ -1019,7 +1009,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
         if not pair:
             await _show_step(call, state, t(language, "pair_not_found"), reply_markup=None)
             await state.clear()
-            await call.answer()
             return
         if action == "set_ban":
             await state.update_data(pending_keyword_mode="ban")
@@ -1100,7 +1089,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                     markup_payload={"type": "pair_picker", "prefix": "ads_pair_del", "include_all": False},
                 )
                 await _show_step(call, state, t(language, "ads_delete_choose"), reply_markup=pair_picker("ads_pair_del", pairs, language))
-        await call.answer()
         return
 
     if data.startswith("ads_pair_add:") and current_state == AdsStates.waiting_pair_for_add.state:
@@ -1109,7 +1097,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             await state.update_data(pair_no=int(choice))
             await _set_step(state, AdsStates.waiting_values, prompt_key="ads_send", markup_payload={"type": "flow_nav", "prefix": "ads_text"})
             await _show_step(call, state, t(language, "ads_send"), reply_markup=text_step_keyboard("ads_text", language))
-        await call.answer()
         return
 
     if data.startswith("ads_pair_del:") and current_state == AdsStates.waiting_pair_for_delete.state:
@@ -1122,8 +1109,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 await state.update_data(pair_no=pair.pair_no)
                 await _set_step(state, AdsStates.waiting_delete_confirm, prompt_key="ads_delete_choose", markup_payload={"type": "ads_delete_confirm"})
                 await _show_step(call, state, _pair_line(pair), reply_markup=confirm_keyboard("ads_delete_confirm", language))
-        await call.answer()
-        return
+            return
 
     if data.startswith("ads_delete_confirm:") and current_state == AdsStates.waiting_delete_confirm.state:
         action = data.split(":", 1)[1]
@@ -1133,7 +1119,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             await _show_step(call, state, t(language, "ads_deleted"), reply_markup=None)
             await state.clear()
             await _restore_main_menu(call, language)
-        await call.answer()
         return
 
     if data.startswith("rule_pair:") and current_state == RuleStates.waiting_pair.state:
@@ -1144,7 +1129,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             prefix = "set_forward" if info["field_name"] == "forward_rule" else "set_post"
             await _set_step(state, RuleStates.waiting_value, prompt_key="rule_choose_value", markup_payload={"type": "rule_value", "prefix": prefix})
             await _show_step(call, state, t(language, "rule_choose_value"), reply_markup=rule_keyboard(prefix, language))
-        await call.answer()
         return
 
     if (data.startswith("set_forward:") or data.startswith("set_post:")) and current_state == RuleStates.waiting_value.state:
@@ -1154,7 +1138,6 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
         await _show_step(call, state, t(language, "rule_updated"), reply_markup=None)
         await state.clear()
         await _show_main_menu(call, language)
-        await call.answer()
         return
 
     if data.startswith("check_pair:") and current_state == CheckStates.waiting_pair.state:
@@ -1167,16 +1150,15 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             pairs = [pair] if pair else []
         else:
             pairs = []
+            
+        await _show_step(call, state, "Checking...", reply_markup=None)
         for pair in pairs:
             if pair:
                 await runtime_manager.scan_pair(pair)
         await _show_step(call, state, t(language, "check_done", count=len([p for p in pairs if p])), reply_markup=None)
         await state.clear()
         await _restore_main_menu(call, language)
-        await call.answer()
         return
-
-    await call.answer()
 
 
 @router.message(F.text)
