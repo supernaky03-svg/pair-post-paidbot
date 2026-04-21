@@ -394,7 +394,7 @@ async def admin_otp(message: Message) -> None:
         return
     duration, key = parts[1], parts[2]
     await OtpRepo().create(duration, key, message.from_user.id)
-    await message.answer(t(settings.language_default, "otp_saved", duration=duration, key=key))
+    await message.answer(t(settings.language_default, "otp_saved", duration=duration, otp_key=key))
 
 
 @router.message(Command("info"))
