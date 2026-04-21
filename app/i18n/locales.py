@@ -15,6 +15,7 @@ LOCALES = {
         "menu_language": "Language",
         "menu_back": "Back",
         "menu_cancel": "Cancel",
+        "main_menu_ready": "Choose an option from the menu below."
         "yes": "Yes",
         "no": "No",
         "confirm": "Confirm",
@@ -140,6 +141,7 @@ LOCALES = {
         "menu_language": "ဘာသာစကား",
         "menu_back": "နောက်သို့",
         "menu_cancel": "မလုပ်တော့ဘူး",
+        "main_menu_ready": "အောက်က menu ထဲက တစ်ခုကိုရွေးပါ။"
         "yes": "အတည်ပြုမယ်",
         "no": "မလုပ်တော့ဘူး",
         "confirm": "အတည်ပြုမယ်",
