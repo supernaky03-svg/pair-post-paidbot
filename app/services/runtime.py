@@ -61,9 +61,18 @@ class RuntimeManager:
                 continue
 
     async def scan_all_pairs(self) -> None:
-        pairs = await self.pairs.list_all_active()
-        for pair in pairs:
+    pairs = await self.pairs.list_all_active()
+    for pair in pairs:
+        try:
             await self.scan_pair(pair)
+        except Exception:
+            logger.exception(
+                "Runtime scan failed for pair user_id=%s pair_no=%s source=%s target=%s",
+                pair.user_id,
+                pair.pair_no,
+                pair.source_input,
+                pair.target_input,
+            )
 
     async def _ensure_entities(self, pair: PairRecord):
         cache = runtime_cache.get_pair_entities(pair.user_id, pair.pair_no)
