@@ -258,13 +258,9 @@ async def _cleanup_user_message(message: Message) -> None:
 
 async def _sync_reply_keyboard(target: Message | CallbackQuery, reply_markup) -> None:
     if isinstance(target, Message):
-        sent = await target.answer("⁣", reply_markup=reply_markup)
+        await target.answer(" ", reply_markup=reply_markup)
     else:
-        sent = await target.message.answer("⁣", reply_markup=reply_markup)
-    try:
-        await sent.delete()
-    except Exception:
-        pass
+        await target.message.answer(" ", reply_markup=reply_markup)
 
 
 async def _remove_main_menu(target: Message | CallbackQuery) -> None:
