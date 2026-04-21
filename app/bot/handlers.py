@@ -43,6 +43,8 @@ from app.services.access import AccessService
 from app.services.pair import PairService
 from app.services.runtime import RuntimeManager
 from app.services.tutorial import build_tutorial
+from app.telegram.entity import resolve_target
+from app.telegram.shared_client import client as shared_client
 
 router = Router()
 runtime_manager = RuntimeManager()
@@ -131,35 +133,59 @@ def _normalize_target_for_bot(target_input: str) -> str | int:
     return target_input.strip()
 
 
-def _target_admin_warning_text(language: str, target_input: str, *, failed: bool = False) -> str:
+async def _target_admin_warning_text(language: str, target_input: str, *, failed: bool = False) -> str:
+    account_label = await _session_account_label()
+
     if language == "my":
         base = (
-            "Target channel/group မှာ bot ကို admin ပေးဖို့လိုပါတယ်။\n\n"
+            f"Target channel/group မှာ {account_label} ကို admin ပေးဖို့လိုပါတယ်。\n\n"
             f"Target: {target_input}\n\n"
-            "Bot ကို target မှာ admin ပေးပြီးမှသာ pair အတည်ပြု/target ပြင်ခြင်းကို ဆက်လုပ်နိုင်မယ်။\n"
+            f"{account_label} ကို target မှာ admin ပေးပြီးမှသာ pair အတည်ပြု/target ပြင်ခြင်းကို ဆက်လုပ်နိုင်မယ်。\n"
             "Admin ပေးပြီးရင် အောက်က ခလုတ်ကိုနှိပ်ပါ။"
         )
         if failed:
-            base += "\n\nသတိပေးချက်: Bot က target မှာ admin မဖြစ်သေးပါ။ Target မှာ bot ကို admin ပေးပြီး ထပ်နှိပ်ပါ။"
+            base += (
+                f"\n\nသတိပေးချက်: {account_label} က target မှာ admin မဖြစ်သေးပါ။ "
+                f"Target မှာ {account_label} ကို admin ပေးပြီး ထပ်နှိပ်ပါ။"
+            )
         return base
 
     base = (
-        "You must give this bot admin rights in the target channel/group before continuing.\n\n"
+        f"You must give {account_label} admin rights in the target channel/group before continuing.\n\n"
         f"Target: {target_input}\n\n"
-        "Only after the bot is admin in the target can the pair be confirmed or the target edit be confirmed.\n"
-        "After giving bot admin, press the button below."
+        f"Only after {account_label} is admin in the target can the pair be confirmed or the target edit be confirmed.\n"
+        "After giving admin, press the button below."
     )
     if failed:
-        base += "\n\nWarning: the bot is still not admin in this target. Please give bot admin and try again."
+        base += f"\n\nWarning: {account_label} is still not admin in this target. Please give admin and try again."
     return base
 
 
-async def _bot_has_target_admin(bot, target_input: str) -> bool:
+async def _session_account_label() -> str:
     try:
-        me = await bot.get_me()
-        chat = _normalize_target_for_bot(target_input)
-        member = await bot.get_chat_member(chat_id=chat, user_id=me.id)
-        return getattr(member, "status", "") in {"administrator", "creator"}
+        me = await shared_client.get_me()
+    except Exception:
+        return "session account"
+
+    username = getattr(me, "username", None)
+    if username:
+        return f"@{username}"
+
+    full_name = " ".join(
+        part for part in [getattr(me, "first_name", None), getattr(me, "last_name", None)] if part
+    ).strip()
+    return full_name or "session account"
+
+
+async def _session_has_target_admin(target_input: str) -> bool:
+    try:
+        me = await shared_client.get_me()
+        target = await resolve_target(target_input)
+        perms = await shared_client.get_permissions(target, me)
+        return bool(
+            getattr(perms, "is_creator", False)
+            or getattr(perms, "is_admin", False)
+        )
     except Exception:
         return False
 
