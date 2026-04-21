@@ -992,14 +992,21 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 await call.answer()
                 return
             await state.update_data(pair_no=pair.pair_no)
-            current_values = ", ".join(pair.keyword_values) if pair.keyword_values else "-"
-            await _set_step(state, KeywordStates.waiting_action, prompt_key="keyword_menu", markup_payload={"type": "keyword_actions"})
-            await _show_step(
-                call,
+            ban_values = ", ".join(pair.keyword_values) if pair.keyword_mode == "ban" and pair.keyword_values else "-"
+            post_values = ", ".join(pair.keyword_values) if pair.keyword_mode == "post" and pair.keyword_values else "-"
+            await _set_step(
                 state,
-                t(language, "keyword_current", mode=pair.keyword_mode, values=current_values) + "\n\n" + t(language, "keyword_menu"),
-                reply_markup=keyword_action_keyboard(language),
+                KeywordStates.waiting_action,
+                prompt_key="keyword_pair_menu",
+                markup_payload={"type": "keyword_actions"},
             )
+            await call.message.answer(t(
+                language,
+                "keyword_pair_menu",
+                pair_no=pair.pair_no,
+                ban_values=ban_values,
+                post_values=post_values,
+            ),reply_markup=keyword_action_keyboard(language),)
         await call.answer()
         return
 
@@ -1013,39 +1020,48 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             await call.answer()
             return
         if action == "set_ban":
-            if pair.keyword_values:
-                await pair_service.update_keywords(call.from_user.id, pair.pair_no, "ban", pair.keyword_values)
-                await _show_step(call, state, t(language, "keyword_updated"), reply_markup=None)
-                await state.clear()
-                await _restore_main_menu(call, language)
-            else:
-                await state.update_data(pending_keyword_mode="ban")
-                await _set_step(state, KeywordStates.waiting_add_values, prompt_key="keyword_send", markup_payload={"type": "flow_nav", "prefix": "kw_text"})
-                await _show_step(call, state, t(language, "keyword_send"), reply_markup=text_step_keyboard("kw_text", language))
+            await state.update_data(pending_keyword_mode="ban")
+            await _set_step(
+                state,
+                KeywordStates.waiting_add_values,
+                prompt_key="keyword_send_ban",
+                markup_payload={"type": "flow_nav", "prefix": "kw_text"},
+            )
+            await call.message.answer(
+                t(language, "keyword_send_ban", pair_no=pair.pair_no),
+                reply_markup=text_step_keyboard("kw_text", language),
+            )
         elif action == "set_post":
-            if pair.keyword_values:
-                await pair_service.update_keywords(call.from_user.id, pair.pair_no, "post", pair.keyword_values)
-                await _show_step(call, state, t(language, "keyword_updated"), reply_markup=None)
-                await state.clear()
-                await _restore_main_menu(call, language)
-            else:
-                await state.update_data(pending_keyword_mode="post")
-                await _set_step(state, KeywordStates.waiting_add_values, prompt_key="keyword_send", markup_payload={"type": "flow_nav", "prefix": "kw_text"})
-                await _show_step(call, state, t(language, "keyword_send"), reply_markup=text_step_keyboard("kw_text", language))
-        elif action == "set_off":
-            await pair_service.update_keywords(call.from_user.id, pair.pair_no, "off", [])
-            await _show_step(call, state, t(language, "keyword_cleared"), reply_markup=None)
-            await state.clear()
-            await _restore_main_menu(call, language)
-        elif action == "add":
-            await state.update_data(pending_keyword_mode=pair.keyword_mode if pair.keyword_mode != "off" else "ban")
-            await _set_step(state, KeywordStates.waiting_add_values, prompt_key="keyword_send", markup_payload={"type": "flow_nav", "prefix": "kw_text"})
-            await _show_step(call, state, t(language, "keyword_send"), reply_markup=text_step_keyboard("kw_text", language))
+            await state.update_data(pending_keyword_mode="post")
+            await _set_step(
+                state,
+                KeywordStates.waiting_add_values,
+                prompt_key="keyword_send_post",
+                markup_payload={"type": "flow_nav", "prefix": "kw_text"},
+            )
+            await call.message.answer(
+                t(language, "keyword_send_post", pair_no=pair.pair_no),
+                reply_markup=text_step_keyboard("kw_text", language),
+            )
         elif action == "clear":
-            await _set_step(state, KeywordStates.waiting_clear_values, prompt_key="keyword_remove", markup_payload={"type": "flow_nav", "prefix": "kw_text"})
-            await _show_step(call, state, t(language, "keyword_remove"), reply_markup=text_step_keyboard("kw_text", language))
-        await call.answer()
-        return
+            ban_values = ", ".join(pair.keyword_values) if pair.keyword_mode == "ban" and pair.keyword_values else "-"
+            post_values = ", ".join(pair.keyword_values) if pair.keyword_mode == "post" and pair.keyword_values else "-"
+            await _set_step(
+                state,
+                KeywordStates.waiting_clear_values,
+                prompt_key="keyword_remove_detail",
+                markup_payload={"type": "flow_nav", "prefix": "kw_text"},
+            )
+            await call.message.answer(
+                t(
+                    language,
+                    "keyword_remove_detail",
+                    pair_no=pair.pair_no,
+                    ban_values=ban_values,
+                    post_values=post_values,
+                ),
+                reply_markup=text_step_keyboard("kw_text", language),
+            )
 
     if data.startswith("ads_action:") and current_state == AdsStates.waiting_action.state:
         action = data.split(":", 1)[1]
