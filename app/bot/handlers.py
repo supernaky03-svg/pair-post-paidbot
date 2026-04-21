@@ -190,15 +190,25 @@ async def _session_has_target_admin(target_input: str) -> bool:
         return False
 
 
-def _resolve_step_text(language: str, prompt_key: str | None, prompt_fmt: dict[str, Any] | None, markup_payload: dict[str, Any] | None, *, panel_text: str | None = None) -> str:
+async def _resolve_step_text(
+    language: str,
+    prompt_key: str | None,
+    prompt_fmt: dict[str, Any] | None,
+    markup_payload: dict[str, Any] | None,
+    *,
+    panel_text: str | None = None,
+) -> str:
     if markup_payload and markup_payload.get("type") == "target_admin_gate":
-        return _target_admin_warning_text(language, markup_payload.get("target_input", "-"), failed=bool(markup_payload.get("failed")))
+        return await _target_admin_warning_text(
+            language,
+            markup_payload.get("target_input", "-"),
+            failed=bool(markup_payload.get("failed")),
+        )
     if panel_text:
         return panel_text
     if prompt_key:
         return t(language, prompt_key, **(prompt_fmt or {}))
     return ""
-
 
 async def _status_text(user_id: int, language: str) -> str:
     user = await user_repo.get(user_id)
@@ -769,7 +779,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             prompt_fmt = state_data.get("current_prompt_fmt", {})
             markup_payload = state_data.get("current_markup_payload")
             markup = await _render_markup(call.from_user.id, new_language, markup_payload)
-            step_text = _resolve_step_text(
+            step_text = await _resolve_step_text(
                 new_language,
                 prompt_key,
                 prompt_fmt,
@@ -783,9 +793,11 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             else:
                 await _remove_main_menu(call)
             await _show_step(call, state, t(new_language, "language_set"), reply_markup=None, reset_panel=True)
+            await call.answer()
         return
 
     if current_state and not await _ensure_timeout(call, state, language):
+        await call.answer()
         return
 
     if data.startswith("restore:"):
@@ -801,6 +813,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             await _restore_main_menu(call, language)
         await user_repo.clear_restore_choice(call.from_user.id)
         await state.clear()
+        await call.answer()
         return
 
     if not await _ensure_access_callback(call, state, user=user):
@@ -853,7 +866,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             f"{t(language, 'summary_post_rule')}: {'ON' if info['post_rule'] else 'OFF'}\n"
             f"{t(language, 'summary_forward_rule')}: {'ON' if info['forward_rule'] else 'OFF'}"
         )
-        warning_text = _target_admin_warning_text(language, info["target_input"])
+        warning_text = await _target_admin_warning_text(language, info["target_input"])
         gate_payload = {
             "type": "target_admin_gate",
             "prefix": "add_target_admin",
@@ -875,7 +888,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
         action = data.split(":", 1)[1]
         if action == "done":
             info = await state.get_data()
-            has_admin = await _bot_has_target_admin(call.bot, info["target_input"])
+            has_admin = await _session_has_target_admin(info["target_input"])
             if not has_admin:
                 failed_payload = {
                     "type": "target_admin_gate",
@@ -887,11 +900,14 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 await _show_step(
                     call,
                     state,
-                    _target_admin_warning_text(language, info["target_input"], failed=True),
+                    await _target_admin_warning_text(language, info["target_input"], failed=True),
                     reply_markup=target_admin_keyboard("add_target_admin", language),
                 )
+                account_label = await _session_account_label()
                 await call.answer(
-                    "Bot is not admin in target yet." if language != "my" else "Bot က target မှာ admin မဖြစ်သေးပါ။",
+                    f"{account_label} is not admin in target yet."
+                    if language != "my"
+                    else f"{account_label} က target မှာ admin မဖြစ်သေးပါ။",
                     show_alert=True,
                 )
                 return
@@ -964,7 +980,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
         action = data.split(":", 1)[1]
         if action == "done":
             info = await state.get_data()
-            has_admin = await _bot_has_target_admin(call.bot, info["target_input"])
+            has_admin = await _session_has_target_admin(info["target_input"])
             if not has_admin:
                 failed_payload = {
                     "type": "target_admin_gate",
@@ -976,15 +992,18 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 await _show_step(
                     call,
                     state,
-                    _target_admin_warning_text(language, info["target_input"], failed=True),
+                    await _target_admin_warning_text(language, info["target_input"], failed=True),
                     reply_markup=target_admin_keyboard("edit_target_admin", language),
                 )
+                account_label = await _session_account_label()
                 await call.answer(
-                    "Bot is not admin in target yet." if language != "my" else "Bot က target မှာ admin မဖြစ်သေးပါ။",
+                    f"{account_label} is not admin in target yet."
+                    if language != "my"
+                    else f"{account_label} က target မှာ admin မဖြစ်သေးပါ။",
                     show_alert=True,
                 )
                 return
-
+            
             summary = info.get("summary_text") or ""
             await _set_step(
                 state,
@@ -1028,7 +1047,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 prompt_key="keyword_pair_menu",
                 markup_payload={"type": "keyword_actions"},
             )
-            await await _show_step(
+            await _show_step(
                 call,
                 state,t(
                 language,
@@ -1437,7 +1456,7 @@ async def message_router(message: Message, state: FSMContext) -> None:
         await state.update_data(target_input=message.text.strip())
         info = await state.get_data()
         summary = f"#{info['pair_no']}\n{t(language, 'summary_target')}: {info['target_input']}"
-        warning_text = _target_admin_warning_text(language, info["target_input"])
+        warning_text = await _target_admin_warning_text(language, info["target_input"])
         gate_payload = {
             "type": "target_admin_gate",
             "prefix": "edit_target_admin",
