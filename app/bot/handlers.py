@@ -513,14 +513,11 @@ async def start_cmd(message: Message, state: FSMContext) -> None:
     user = await access_service.ensure_user(message.from_user)
     language = _lang(user)
 
-    if _is_admin(message.from_user.id):
-        await _show_main_menu(message, language)
-        await _show_step(message, state, build_tutorial(language), reply_markup=None, reset_panel=True)
-        return
-
     if user.is_banned:
-        await _remove_main_menu(message)
-        await _show_step(message, state, t(language, "access_blocked"), reply_markup=None, reset_panel=True)
+        await message.answer(
+            t(language, "access_blocked"),
+            reply_markup=hide_reply_keyboard(),
+        )
         return
 
     if user.status != "activated":
@@ -529,14 +526,22 @@ async def start_cmd(message: Message, state: FSMContext) -> None:
         await state.update_data(
             last_activity=_now_ts(),
             current_prompt_key="otp_required",
+            current_prompt_fmt={},
             current_markup_payload={"type": "language"},
             history=[],
         )
-        await _show_step(message, state, t(language, "otp_required"), reply_markup=language_keyboard(), reset_panel=True)
+        await message.answer(
+            t(language, "otp_required"),
+            reply_markup=language_keyboard(),
+        )
         return
 
-    await _show_main_menu(message, language)
-    await _show_step(message, state, build_tutorial(language), reply_markup=None, reset_panel=True)
+    # Admin / activated users must get a fresh message with main_menu(...)
+    await message.answer(build_tutorial(language))
+    await message.answer(
+        t(language, "main_menu_ready"),
+        reply_markup=main_menu(language),
+    )
 
 
 @router.message(Command("otp"))
