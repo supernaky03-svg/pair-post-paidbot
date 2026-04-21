@@ -109,8 +109,6 @@ def keyword_action_keyboard(language: str) -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text=t(language, "keyword_mode_ban"), callback_data="kw_action:set_ban")],
             [InlineKeyboardButton(text=t(language, "keyword_mode_post"), callback_data="kw_action:set_post")],
-            [InlineKeyboardButton(text=t(language, "keyword_mode_off"), callback_data="kw_action:set_off")],
-            [InlineKeyboardButton(text=t(language, "keyword_add"), callback_data="kw_action:add")],
             [InlineKeyboardButton(text=t(language, "keyword_clear"), callback_data="kw_action:clear")],
             [
                 InlineKeyboardButton(text=t(language, "menu_back"), callback_data="kw_action:back"),
