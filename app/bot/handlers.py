@@ -723,7 +723,7 @@ async def admin_joined_sources(message: Message) -> None:
 
 @router.callback_query()
 async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
-    user = user or await access_service.ensure_user(call.from_user)
+    user = await access_service.ensure_user(call.from_user)
     language = _lang(user)
 
     data = call.data or ""
