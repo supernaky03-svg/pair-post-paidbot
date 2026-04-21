@@ -71,15 +71,29 @@ LOCALES = {
         "edit_source_confirm": "Confirm source update?",
         "edit_target_confirm": "Confirm target update?",
         "keyword_intro": "Choose a pair to manage keywords.",
-        "keyword_current": "Current keyword mode: {mode}\nCurrent keywords: {values}",
-        "keyword_menu": "Choose what you want to do.",
-        "keyword_mode_off": "Off",
+        "keyword_pair_menu": (
+            "Pair {pair_no}\n"
+            "Ban keyword: {ban_values}\n"
+            "Post keyword: {post_values}\n\n"
+            "Choose what you want to do."
+        ),
         "keyword_mode_ban": "Ban Keyword",
         "keyword_mode_post": "Post Keyword",
-        "keyword_add": "Add Keyword",
         "keyword_clear": "Clear Keyword",
-        "keyword_send": "Send one or more keywords separated by commas.",
-        "keyword_remove": "Send keyword(s) to remove, separated by commas. Send all to clear all keywords.",
+        "keyword_send_ban": (
+            "Send ban keyword(s) for pair {pair_no}.\n"
+            "If more than one, separate with commas (,)."
+        ),
+        "keyword_send_post": (
+            "Send post keyword(s) for pair {pair_no}.\n"
+            "If more than one, separate with commas (,)."
+        ),
+        "keyword_remove_detail": (
+            'Pair {pair_no} ban keyword: "{ban_values}"\n'
+            'Post keyword: "{post_values}"\n\n'
+            "Send keyword(s) to remove.\n"
+            "If more than one, separate with commas (,)."
+        ),
         "keyword_updated": "Keyword settings updated.",
         "keyword_cleared": "Keywords cleared. Mode was reset to off.",
         "ads_intro": "Choose what you want to do with ads.",
@@ -197,16 +211,29 @@ LOCALES = {
         "edit_source_confirm": "Source update ကိုအတည်ပြုမလား။",
         "edit_target_confirm": "Target update ကိုအတည်ပြုမလား။",
         "keyword_intro": "Keyword စီမံဖို့ pair ကိုရွေးပါ။",
-        "keyword_current": "လက်ရှိ keyword mode: {mode}\nလက်ရှိ keywords: {values}",
-        "keyword_menu": "ဘာလုပ်ချင်လဲရွေးပါ။",
-        "keyword_mode_off": "Off",
+        "keyword_pair_menu": (
+            "Pair {pair_no}\n"
+            "Ban keyword: {ban_values}\n"
+            "Post keyword: {post_values}\n\n"
+            "Choose what you want to do."
+        ),
         "keyword_mode_ban": "Ban Keyword",
         "keyword_mode_post": "Post Keyword",
-        "keyword_add": "Keyword ထည့်မယ်",
-        "keyword_clear": "Keyword ဖျက်မယ်",
-        "keyword_send": "Keyword တစ်ခု သို့မဟုတ် အများကြီးကို comma နဲ့ခွဲပြီးပို့ပါ။",
-        "keyword_remove": "ဖျက်မယ့် keyword တွေကို comma နဲ့ခွဲပြီးပို့ပါ။ အားလုံးရှင်းချင်ရင် all ပို့ပါ။",
-        "keyword_updated": "Keyword settings ပြင်ပြီးပါပြီ။",
+        "keyword_clear": "Clear Keyword",
+        "keyword_send_ban": (
+            "Send ban keyword(s) for pair {pair_no}.\n"
+            "If more than one, separate with commas (,)."
+        ),
+        "keyword_send_post": (
+            "Send post keyword(s) for pair {pair_no}.\n"
+            "If more than one, separate with commas (,)."
+        ),
+        "keyword_remove_detail": (
+            'Pair {pair_no} ban keyword: "{ban_values}"\n'
+            'Post keyword: "{post_values}"\n\n'
+            "Send keyword(s) to remove.\n"
+            "If more than one, separate with commas (,)."
+        ),
         "keyword_cleared": "Keywords ရှင်းပြီးပါပြီ။ Mode ကို off ပြန်ထားလိုက်ပါတယ်။",
         "ads_intro": "Ads နဲ့ပတ်သက်ပြီး ဘာလုပ်ချင်လဲရွေးပါ။",
         "ads_add": "Ads ထည့်မယ်",
