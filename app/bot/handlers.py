@@ -1000,7 +1000,9 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 prompt_key="keyword_pair_menu",
                 markup_payload={"type": "keyword_actions"},
             )
-            await call.message.answer(t(
+            await await _show_step(
+                call,
+                state,t(
                 language,
                 "keyword_pair_menu",
                 pair_no=pair.pair_no,
@@ -1027,7 +1029,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 prompt_key="keyword_send_ban",
                 markup_payload={"type": "flow_nav", "prefix": "kw_text"},
             )
-            await call.message.answer(
+            await _show_step(call,state,
                 t(language, "keyword_send_ban", pair_no=pair.pair_no),
                 reply_markup=text_step_keyboard("kw_text", language),
             )
@@ -1039,7 +1041,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 prompt_key="keyword_send_post",
                 markup_payload={"type": "flow_nav", "prefix": "kw_text"},
             )
-            await call.message.answer(
+            await _show_step(call,state,
                 t(language, "keyword_send_post", pair_no=pair.pair_no),
                 reply_markup=text_step_keyboard("kw_text", language),
             )
@@ -1052,7 +1054,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                 prompt_key="keyword_remove_detail",
                 markup_payload={"type": "flow_nav", "prefix": "kw_text"},
             )
-            await call.message.answer(
+            await _show_step(call,state,
                 t(
                     language,
                     "keyword_remove_detail",
