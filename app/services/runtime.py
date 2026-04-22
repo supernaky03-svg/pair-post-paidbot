@@ -1,12 +1,14 @@
+
 from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
 
+from telethon.errors.rpcerrorlist import ChatWriteForbiddenError
+
 from app.core.logging import logger
 from app.db.repositories import PairRepo
 from app.domain.models import PairRecord
-from app.services.target_admin_notifier import TargetAdminNotifier
 from app.services.repost_logic import (
     collect_grouped_messages,
     is_duplicate,
@@ -17,8 +19,7 @@ from app.services.repost_logic import (
     should_process_album,
     should_process_single,
 )
-from telethon.errors.rpcerrorlist import ChatWriteForbiddenError
-
+from app.services.target_admin_notifier import TargetAdminNotifier
 from app.telegram.entity import resolve_source, resolve_target
 from app.telegram.safe_ops import safe_get_messages
 from app.telegram.shared_client import client
@@ -102,8 +103,8 @@ class RuntimeManager:
         source_lock = runtime_cache.source_locks[pair.source_key]
         target_key = str(pair.target_chat_id or pair.target_input)
         target_lock = runtime_cache.target_locks[target_key]
-        self._active_checks[pair.source_key] += 1
 
+        self._active_checks[pair.source_key] += 1
         try:
             async with source_lock:
                 source_entity, target_entity = await self._ensure_entities(pair)
@@ -167,27 +168,26 @@ class RuntimeManager:
         main_allowed = should_process_album(pair, album)
         if pair.post_rule and any(is_video_message(m) for m in album) and main_allowed:
             first_id = min(ids)
-            if first_id > 1:
-                prev = await safe_get_messages(source_entity, ids=first_id - 1)
-                if prev:
-                    if getattr(prev, "grouped_id", None):
-                        preview_album = await collect_grouped_messages(source_entity, prev)
-                        preview_ids = [int(m.id) for m in preview_album]
-                        if preview_album and not is_duplicate(pair, preview_ids) and should_process_album(
-                            pair,
-                            preview_album,
-                            bypass_post_rule=True,
-                        ):
-                            await send_album(pair, target_entity, preview_album, bypass_post_rule=True)
-                            pair.recent_sent_ids = (pair.recent_sent_ids + preview_ids)[-200:]
-                    else:
-                        if not is_duplicate(pair, [int(prev.id)]) and should_process_single(
-                            pair,
-                            prev,
-                            bypass_post_rule=True,
-                        ):
-                            await send_single(pair, target_entity, prev)
-                            pair.recent_sent_ids = (pair.recent_sent_ids + [int(prev.id)])[-200:]
+            prev = await self._find_previous_message_before(source_entity, first_id)
+            if prev:
+                if getattr(prev, "grouped_id", None):
+                    preview_album = await collect_grouped_messages(source_entity, prev)
+                    preview_ids = [int(m.id) for m in preview_album]
+                    if (
+                        preview_album
+                        and not is_duplicate(pair, preview_ids)
+                        and should_process_album(pair, preview_album, bypass_post_rule=True)
+                    ):
+                        await send_album(pair, target_entity, preview_album, bypass_post_rule=True)
+                        pair.recent_sent_ids = (pair.recent_sent_ids + preview_ids)[-200:]
+                else:
+                    prev_id = int(prev.id)
+                    if (
+                        not is_duplicate(pair, [prev_id])
+                        and should_process_single(pair, prev, bypass_post_rule=True)
+                    ):
+                        await send_single(pair, target_entity, prev)
+                        pair.recent_sent_ids = (pair.recent_sent_ids + [prev_id])[-200:]
 
         if main_allowed:
             await send_album(pair, target_entity, album)
@@ -196,7 +196,6 @@ class RuntimeManager:
         pair.recent_sent_ids = (pair.recent_sent_ids + ids)[-200:]
         pair.last_processed_id = max(pair.last_processed_id, max(ids))
         await self.pairs.save(pair)
-
 
     async def _notify_target_admin_required(self, pair: PairRecord) -> None:
         if self._bot is None:
@@ -212,31 +211,49 @@ class RuntimeManager:
             )
 
     async def _send_preview_for_message(self, pair: PairRecord, source_entity, target_entity, msg) -> None:
-        prev_id = int(msg.id) - 1
-        if prev_id <= 0:
-            return
-
-        prev = await safe_get_messages(source_entity, ids=prev_id)
+        prev = await self._find_previous_message_before(source_entity, int(msg.id))
         if not prev:
             return
 
         if getattr(prev, "grouped_id", None):
             preview_album = await collect_grouped_messages(source_entity, prev)
             preview_ids = [int(m.id) for m in preview_album]
-            if preview_album and not is_duplicate(pair, preview_ids) and should_process_album(
-                pair,
-                preview_album,
-                bypass_post_rule=True,
+            if (
+                preview_album
+                and not is_duplicate(pair, preview_ids)
+                and should_process_album(pair, preview_album, bypass_post_rule=True)
             ):
                 await send_album(pair, target_entity, preview_album, bypass_post_rule=True)
                 pair.recent_sent_ids = (pair.recent_sent_ids + preview_ids)[-200:]
         else:
-            if not is_duplicate(pair, [int(prev.id)]) and should_process_single(
-                pair,
-                prev,
-                bypass_post_rule=True,
+            prev_id = int(prev.id)
+            if (
+                not is_duplicate(pair, [prev_id])
+                and should_process_single(pair, prev, bypass_post_rule=True)
             ):
                 await send_single(pair, target_entity, prev)
-                pair.recent_sent_ids = (pair.recent_sent_ids + [int(prev.id)])[-200:]
+                pair.recent_sent_ids = (pair.recent_sent_ids + [prev_id])[-200:]
 
+    async def _find_previous_message_before(self, source_entity, before_id: int):
+        """
+        Find the nearest real previous message before `before_id`.
+
+        This avoids relying on `before_id - 1`, which fails when channel IDs have
+        gaps because of deleted/service messages.
+        """
+        async for prev in client.iter_messages(source_entity, offset_id=before_id):
+            prev_id = int(getattr(prev, "id", 0) or 0)
+            if prev_id <= 0 or prev_id >= before_id:
+                continue
+
+            if (
+                getattr(prev, "action", None)
+                and not getattr(prev, "media", None)
+                and not getattr(prev, "message", None)
+            ):
+                continue
+
+            return prev
+
+        return None
             
