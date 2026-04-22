@@ -312,6 +312,18 @@ async def _show_main_menu(target: Message | CallbackQuery, language: str) -> Non
     else:
         await target.message.answer(text, reply_markup=main_menu(language))
 
+async def _finish_with_main_menu(
+    target: Message | CallbackQuery,
+    state: FSMContext,
+    language: str,
+    text: str,
+) -> None:
+    await state.clear()
+    if isinstance(target, Message):
+        await target.answer(text, reply_markup=main_menu(language))
+    else:
+        await target.message.answer(text, reply_markup=main_menu(language))
+
 
 async def _restore_main_menu(target: Message | CallbackQuery, language: str) -> None:
     text = "Main menu restored." if language != "my" else "Main menu ပြန်ပေါ်ပါပြီ။"
@@ -1234,13 +1246,21 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             pairs = []
             
         await _show_step(call, state, "Checking...", reply_markup=None)
+        
+        checked_count = 0
         for pair in pairs:
             if pair:
-                await runtime_manager.scan_pair(pair)
-        await _show_step(call, state, t(language, "check_done", count=len([p for p in pairs if p])), reply_markup=None)
-        await state.clear()
-        await _restore_main_menu(call, language)
+                await runtime_manager.scan_pair_manual(pair)
+                checked_count += 1
+                
+        await _finish_with_main_menu(
+            call,
+            state,
+            language,
+            t(language, "check_done", count=checked_count),
+        )
         return
+    
 
 
 @router.message(F.text)
@@ -1334,7 +1354,6 @@ async def message_router(message: Message, state: FSMContext) -> None:
         return
     if action == "check":
         await state.clear()
-        await _remove_main_menu(message)
         await _set_step(state, CheckStates.waiting_pair, prompt_key="choose_pair_or_all", markup_payload={"type": "pair_picker", "prefix": "check_pair", "include_all": True}, remember=False)
         pairs = await pair_repo.list_for_user(message.from_user.id)
         await _show_step(message, state, t(language, "choose_pair_or_all"), reply_markup=pair_picker("check_pair", pairs, language, include_all=True), reset_panel=True)
