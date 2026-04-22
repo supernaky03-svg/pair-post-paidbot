@@ -17,7 +17,7 @@ from app.telegram.safe_ops import (
 
 # Remove common ad/share links from outgoing text while keeping the rest intact.
 LINK_RE = re.compile(r"(?i)\b(?:https?://|www\.|t\.me/|telegram\.me/)\S+")
-USERNAME_RE = re.compile(r"(?<!\w)@[A-Za-z0-9_]{3,32}\b")
+USERNAME_RE = re.compile(r"(?i)(?<!\w)@[a-z0-9_]{5,32}\b")
 
 
 def message_text(msg: Any) -> str:
@@ -36,8 +36,13 @@ def strip_links_preserve_text(text: str) -> str:
         line = re.sub(r"[ \t]{2,}", " ", line).strip()
         if line:
             cleaned_lines.append(line)
-
     return "\n".join(cleaned_lines).strip()
+
+
+def maybe_clean_text(pair: PairRecord, text: str) -> str:
+    if pair.remove_url_rule:
+        return strip_links_preserve_text(text)
+    return (text or "").strip()
 
 
 def is_forwarded(msg: Any) -> bool:
@@ -106,7 +111,7 @@ def append_ads(text: str, ads: list[str]) -> str:
 
 
 def build_single_text(pair: PairRecord, msg: Any) -> str:
-    cleaned = strip_links_preserve_text(message_text(msg))
+    cleaned = maybe_clean_text(pair, message_text(msg))
     return append_ads(cleaned, pair.ads)
 
 
@@ -114,7 +119,7 @@ def build_album_captions(pair: PairRecord, album: list[Any]) -> list[str]:
     ads_text = "\n".join(a.strip() for a in pair.ads if a.strip())
     captions: list[str] = []
     for index, msg in enumerate(album):
-        text = strip_links_preserve_text(message_text(msg))
+        text = maybe_clean_text(pair, message_text(msg))
         if index == 0 and ads_text:
             captions.append(f"{text}\n\n{ads_text}".strip())
         else:
@@ -191,7 +196,7 @@ async def send_album(pair: PairRecord, target_entity, album: list[Any], *, bypas
     if files:
         await safe_send_album(target_entity, files, captions)
     else:
-        text = append_ads(strip_links_preserve_text(collect_album_text(album)), pair.ads)
+        text = append_ads(maybe_clean_text(pair, collect_album_text(album)), pair.ads)
         if text:
             await safe_send_message(target_entity, text)
 
@@ -207,3 +212,4 @@ async def collect_grouped_messages(source_entity, msg_or_id: Any) -> list[Any]:
         return [source_msg]
     items = [m for m in around if getattr(m, "grouped_id", None) == grouped_id]
     return sorted(items, key=lambda x: x.id)
+        
