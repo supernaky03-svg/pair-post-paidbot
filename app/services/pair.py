@@ -6,7 +6,13 @@ from app.core.exceptions import ValidationError
 from app.db.repositories import PairRepo, SettingsRepo, UserRepo
 from app.domain.models import PairRecord
 from app.services.source_registry import SourceRegistryService
-from app.telegram.entity import resolve_source, resolve_target
+from app.services.target_registry import TargetRegistryService
+from app.telegram.entity import (
+    describe_target,
+    resolve_and_join_target,
+    resolve_source,
+    resolve_target,
+)
 
 
 class PairService:
@@ -15,6 +21,7 @@ class PairService:
         self.users = UserRepo()
         self.settings = SettingsRepo()
         self.sources = SourceRegistryService()
+        self.targets = TargetRegistryService()
 
     async def get_pair_limit(self, user_id: int) -> int:
         user = await self.users.get(user_id)
@@ -68,6 +75,16 @@ class PairService:
             return []
         return [part.strip() for part in raw.split(",") if part.strip()]
 
+    async def prepare_target_for_confirmation(self, target_input: str) -> dict:
+        resolved_target = await resolve_and_join_target(target_input)
+        return {
+            "target_input": target_input,
+            "target_key": resolved_target.target_key,
+            "target_chat_id": resolved_target.chat_id,
+            "target_title": resolved_target.title,
+            "target_kind": resolved_target.target_kind,
+        }
+
     async def build_pair(
         self,
         *,
@@ -88,7 +105,7 @@ class PairService:
             raise ValidationError(f"Pair limit exceeded. Your limit is {pair_limit}.")
         resolved_source = await resolve_source(source_input)
         await self.validate_source_reuse(user_id, resolved_source.source_key)
-        target_entity = await resolve_target(target_input)
+        resolved_target = await resolve_and_join_target(target_input)
         pair = PairRecord(
             user_id=user_id,
             pair_no=pair_no,
@@ -96,8 +113,9 @@ class PairService:
             source_key=resolved_source.source_key,
             source_kind=resolved_source.source_kind,
             target_input=target_input,
-            target_chat_id=getattr(target_entity, "id", None),
-            target_title=getattr(target_entity, "title", None),
+            target_key=resolved_target.target_key,
+            target_chat_id=resolved_target.chat_id,
+            target_title=resolved_target.title,
             scan_count=scan_count,
             forward_rule=forward_rule,
             post_rule=post_rule,
@@ -106,6 +124,7 @@ class PairService:
         )
         await self.pairs.save(pair)
         await self.sources.attach_source(pair, resolved_source)
+        await self.targets.attach_target(pair, resolved_target)
         return pair
 
     async def delete_pair(self, user_id: int, pair_no: int) -> PairRecord:
@@ -114,10 +133,17 @@ class PairService:
             raise ValidationError("Pair not found.")
         await self.pairs.deactivate(user_id, pair_no)
         try:
-            old_entity = (await resolve_source(pair.source_input)).entity
+            old_source_entity = (await resolve_source(pair.source_input)).entity
         except Exception:
-            old_entity = None
-        await self.sources.detach_source_if_unused(pair.source_key, old_entity)
+            old_source_entity = None
+        await self.sources.detach_source_if_unused(pair.source_key, old_source_entity)
+
+        old_target_key = pair.target_key or describe_target(pair.target_input).target_key
+        try:
+            old_target_entity = await resolve_target(pair.target_input)
+        except Exception:
+            old_target_entity = None
+        await self.targets.detach_target_if_unused(old_target_key, old_target_entity)
         return pair
 
     async def update_source(self, user_id: int, pair_no: int, source_input: str, scan_count: int | None) -> PairRecord:
@@ -148,11 +174,21 @@ class PairService:
         pair = await self.pairs.get(user_id, pair_no)
         if not pair or not pair.active:
             raise ValidationError("Pair not found.")
-        target_entity = await resolve_target(target_input)
+        old_target_key = pair.target_key or describe_target(pair.target_input).target_key
+        old_target_input = pair.target_input
+        resolved_target = await resolve_and_join_target(target_input)
         pair.target_input = target_input
-        pair.target_chat_id = getattr(target_entity, "id", None)
-        pair.target_title = getattr(target_entity, "title", None)
+        pair.target_key = resolved_target.target_key
+        pair.target_chat_id = resolved_target.chat_id
+        pair.target_title = resolved_target.title
         await self.pairs.save(pair)
+        await self.targets.attach_target(pair, resolved_target)
+        if old_target_key != pair.target_key:
+            try:
+                old_entity = await resolve_target(old_target_input)
+            except Exception:
+                old_entity = None
+            await self.targets.detach_target_if_unused(old_target_key, old_entity)
         return pair
 
     async def update_keywords(self, user_id: int, pair_no: int, mode: str, values: list[str]) -> PairRecord:
@@ -199,3 +235,4 @@ class PairService:
             raise ValidationError("Unknown rule.")
         await self.pairs.save(pair)
         return pair
+    
