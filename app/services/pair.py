@@ -96,6 +96,7 @@ class PairService:
         ads: list[str],
         post_rule: bool,
         forward_rule: bool,
+        remove_url_rule: bool = True,
         generation: int = 1,
     ) -> PairRecord:
         await self.validate_pair_no(user_id, pair_no, creating=True)
@@ -121,6 +122,7 @@ class PairService:
             post_rule=post_rule,
             ads=ads,
             generation=generation,
+            remove_url_rule=remove_url_rule,
         )
         await self.pairs.save(pair)
         await self.sources.attach_source(pair, resolved_source)
@@ -146,7 +148,7 @@ class PairService:
         await self.targets.detach_target_if_unused(old_target_key, old_target_entity)
         return pair
 
-    async def update_source(self, user_id: int, pair_no: int, source_input: str, scan_count: int | None) -> PairRecord:
+    async def update_source(self,user_id: int,pair_no: int,source_input: str,scan_count: int | None,remove_url_rule: bool | None = None,) -> PairRecord:
         pair = await self.pairs.get(user_id, pair_no)
         if not pair or not pair.active:
             raise ValidationError("Pair not found.")
@@ -160,6 +162,8 @@ class PairService:
         pair.scan_count = scan_count
         pair.last_processed_id = 0
         pair.recent_sent_ids = []
+        if remove_url_rule is not None:
+        pair.remove_url_rule = remove_url_rule
         await self.pairs.save(pair)
         await self.sources.attach_source(pair, resolved_source)
         if old_source_key != pair.source_key:
@@ -231,6 +235,8 @@ class PairService:
             pair.post_rule = value
         elif field_name == "forward_rule":
             pair.forward_rule = value
+        elif field_name == "remove_url_rule":
+            pair.remove_url_rule = value
         else:
             raise ValidationError("Unknown rule.")
         await self.pairs.save(pair)
