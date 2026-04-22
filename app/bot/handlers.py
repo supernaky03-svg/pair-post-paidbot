@@ -67,12 +67,14 @@ STATE_BY_NAME = {
         AddPairStates.waiting_ads,
         AddPairStates.waiting_post_rule,
         AddPairStates.waiting_forward_rule,
+        AddPairStates.waiting_remove_url_rule,
         AddPairStates.waiting_confirm,
         DeletePairStates.waiting_pair_no,
         DeletePairStates.waiting_confirm,
         EditSourceStates.waiting_pair_no,
         EditSourceStates.waiting_source,
         EditSourceStates.waiting_scan,
+        EditSourceStates.waiting_remove_url_rule,
         EditSourceStates.waiting_confirm,
         EditTargetStates.waiting_pair_no,
         EditTargetStates.waiting_target,
@@ -111,8 +113,10 @@ def _pair_line(pair: PairRecord) -> str:
     scan = "all" if pair.scan_count is None else str(pair.scan_count)
     return (
         f"#{pair.pair_no} | {pair.source_input} -> {pair.target_input}\n"
-        f"scan={scan} | keywords={pair.keyword_mode}:{keyword_values} | ads={ads_values}\n"
-        f"post_rule={'ON' if pair.post_rule else 'OFF'} | forward_rule={'ON' if pair.forward_rule else 'OFF'}"
+        f"scan={scan} | keywords={pair.keyword_mode}:{keyword_values} | ads={ads_values}"
+        f"post_rule={'ON' if pair.post_rule else 'OFF'} | "
+        f"forward_rule={'ON' if pair.forward_rule else 'OFF'} | "
+        f"remove_url_rule={'ON' if pair.remove_url_rule else 'OFF'}"
     )
 
 
@@ -380,6 +384,10 @@ async def _render_markup(user_id: int, language: str, payload: dict[str, Any] | 
         return rule_keyboard("add_post", language)
     if kind == "add_forward_rule":
         return rule_keyboard("add_forward", language)
+    if kind == "add_remove_url_rule":
+        return rule_keyboard("add_remove_url", language)
+    if kind == "edit_source_remove_url_rule":
+        return rule_keyboard("edit_source_remove_url", language)
     if kind == "target_admin_gate":
         return target_admin_keyboard(payload.get("prefix", "target_admin"), language)
     if kind == "pair_confirm":
@@ -581,6 +589,7 @@ def _menu_action(text: str | None) -> str | None:
         "post_rule": {"post rule"},
         "contact": {"contact", "ဆက်သွယ်ရန်"},
         "language": {"language", "ဘာသာစကား"},
+        "remove_url_rule": {"remove url rule", "remove url", "url rule"},
     }
     for action, values in candidates.items():
         if normalized in {value.lower() for value in values}:
@@ -892,6 +901,25 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
     if data.startswith("add_forward:") and current_state == AddPairStates.waiting_forward_rule.state:
         value = data.split(":", 1)[1]
         await state.update_data(forward_rule=(value == "on"))
+
+        await _set_step(
+            state,
+            AddPairStates.waiting_remove_url_rule,
+            prompt_key="rule_remove_url_explain",
+            markup_payload={"type": "add_remove_url_rule"},
+        )
+        await _show_step(
+            call,
+            state,
+            t(language, "rule_remove_url_explain"),
+            reply_markup=rule_keyboard("add_remove_url", language),
+        )
+        return
+
+    if data.startswith("add_remove_url:") and current_state == AddPairStates.waiting_remove_url_rule.state:
+        value = data.split(":", 1)[1]
+        await state.update_data(remove_url_rule=(value == "on"))
+
         info = await state.get_data()
         scan = "all" if info["scan_count"] is None else str(info["scan_count"])
         summary = (
@@ -902,8 +930,10 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             f"{t(language, 'summary_target')}: {info['target_input']}\n"
             f"{t(language, 'summary_ads')}: {', '.join(info['ads']) or '-'}\n"
             f"{t(language, 'summary_post_rule')}: {'ON' if info['post_rule'] else 'OFF'}\n"
-            f"{t(language, 'summary_forward_rule')}: {'ON' if info['forward_rule'] else 'OFF'}"
+            f"{t(language, 'summary_forward_rule')}: {'ON' if info['forward_rule'] else 'OFF'}\n"
+            f"{t(language, 'summary_remove_url_rule')}: {'ON' if info['remove_url_rule'] else 'OFF'}"
         )
+
         warning_text = await _target_admin_warning_text(language, info["target_input"])
         gate_payload = {
             "type": "target_admin_gate",
@@ -911,6 +941,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             "target_input": info["target_input"],
             "failed": False,
         }
+
         await _set_step(
             state,
             AddPairStates.waiting_confirm,
@@ -919,8 +950,14 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             panel_text=warning_text,
         )
         await state.update_data(summary_text=summary)
-        await _show_step(call, state, warning_text, reply_markup=target_admin_keyboard("add_target_admin", language))
+        await _show_step(
+            call,
+            state,
+            warning_text,
+            reply_markup=target_admin_keyboard("add_target_admin", language),
+        )
         return
+        
 
     if data.startswith("add_target_admin:") and current_state == AddPairStates.waiting_confirm.state:
         action = data.split(":", 1)[1]
@@ -976,6 +1013,7 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                     ads=info["ads"],
                     post_rule=info["post_rule"],
                     forward_rule=info["forward_rule"],
+                    remove_url_rule=info["remove_url_rule"]
                 )
             except Exception as exc:
                 await _show_step(call, state, f"Create failed: {exc}", reply_markup=None)
