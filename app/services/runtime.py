@@ -6,6 +6,7 @@ from collections import defaultdict
 from app.core.logging import logger
 from app.db.repositories import PairRepo
 from app.domain.models import PairRecord
+from app.services.target_admin_notifier import TargetAdminNotifier
 from app.services.repost_logic import (
     collect_grouped_messages,
     is_duplicate,
@@ -16,6 +17,8 @@ from app.services.repost_logic import (
     should_process_album,
     should_process_single,
 )
+from telethon.errors.rpcerrorlist import ChatWriteForbiddenError
+
 from app.telegram.entity import resolve_source, resolve_target
 from app.telegram.safe_ops import safe_get_messages
 from app.telegram.shared_client import client
@@ -27,11 +30,14 @@ class RuntimeManager:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._active_checks: dict[str, int] = defaultdict(int)
+        self._bot = None
+        self.notifier = TargetAdminNotifier()
 
-    async def start(self) -> None:
+    async def start(self, bot=None) -> None:
         if self._task and not self._task.done():
             return
         self._stop.clear()
+        self._bot = bot
         self._task = asyncio.create_task(self._loop())
 
     async def stop(self) -> None:
@@ -66,6 +72,15 @@ class RuntimeManager:
         for pair in pairs:
             try:
                 await self.scan_pair(pair)
+            except ChatWriteForbiddenError:
+                await self._notify_target_admin_required(pair)
+                logger.exception(
+                    "Runtime scan failed for pair user_id=%s pair_no=%s source=%s target=%s",
+                    pair.user_id,
+                    pair.pair_no,
+                    pair.source_input,
+                    pair.target_input,
+                )
             except Exception:
                 logger.exception(
                     "Runtime scan failed for pair user_id=%s pair_no=%s source=%s target=%s",
@@ -133,6 +148,7 @@ class RuntimeManager:
 
         if main_allowed:
             await send_single(pair, target_entity, msg)
+            await self.notifier.clear_for_pair(pair)
 
         pair.recent_sent_ids = (pair.recent_sent_ids + [msg_id])[-200:]
         pair.last_processed_id = max(pair.last_processed_id, msg_id)
@@ -175,10 +191,25 @@ class RuntimeManager:
 
         if main_allowed:
             await send_album(pair, target_entity, album)
+            await self.notifier.clear_for_pair(pair)
 
         pair.recent_sent_ids = (pair.recent_sent_ids + ids)[-200:]
         pair.last_processed_id = max(pair.last_processed_id, max(ids))
         await self.pairs.save(pair)
+
+
+    async def _notify_target_admin_required(self, pair: PairRecord) -> None:
+        if self._bot is None:
+            return
+        try:
+            await self.notifier.notify_target_admin_required(self._bot, pair)
+        except Exception:
+            logger.exception(
+                "Failed to send target-admin notification user_id=%s pair_no=%s target=%s",
+                pair.user_id,
+                pair.pair_no,
+                pair.target_input,
+            )
 
     async def _send_preview_for_message(self, pair: PairRecord, source_entity, target_entity, msg) -> None:
         prev_id = int(msg.id) - 1
@@ -207,4 +238,5 @@ class RuntimeManager:
             ):
                 await send_single(pair, target_entity, prev)
                 pair.recent_sent_ids = (pair.recent_sent_ids + [int(prev.id)])[-200:]
-                    
+
+            
