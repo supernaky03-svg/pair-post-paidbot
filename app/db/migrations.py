@@ -3,7 +3,7 @@ from __future__ import annotations
 from app.db.connection import execute
 
 MIGRATIONS = [
-    '''
+    """
     CREATE TABLE IF NOT EXISTS users (
         user_id BIGINT PRIMARY KEY,
         username TEXT,
@@ -18,8 +18,8 @@ MIGRATIONS = [
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
-    ''',
-    '''
+    """,
+    """
     CREATE TABLE IF NOT EXISTS otp_keys (
         key_hash TEXT PRIMARY KEY,
         duration_code TEXT NOT NULL,
@@ -30,15 +30,15 @@ MIGRATIONS = [
         redeemed_at TIMESTAMPTZ,
         activated_until TIMESTAMPTZ
     )
-    ''',
-    '''
+    """,
+    """
     CREATE TABLE IF NOT EXISTS global_settings (
         key TEXT PRIMARY KEY,
         value_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
-    ''',
-    '''
+    """,
+    """
     CREATE TABLE IF NOT EXISTS sources (
         source_key TEXT PRIMARY KEY,
         source_input TEXT NOT NULL,
@@ -53,8 +53,25 @@ MIGRATIONS = [
         last_error TEXT,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
-    ''',
-    '''
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS targets (
+        target_key TEXT PRIMARY KEY,
+        target_input TEXT NOT NULL,
+        target_kind TEXT NOT NULL,
+        normalized_value TEXT NOT NULL,
+        invite_hash TEXT,
+        joined_by_shared_session BOOLEAN NOT NULL DEFAULT FALSE,
+        active_pair_reference_count INTEGER NOT NULL DEFAULT 0,
+        chat_id BIGINT,
+        title TEXT,
+        last_verified_at TIMESTAMPTZ,
+        last_error TEXT,
+        last_session_fingerprint TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS pairs (
         user_id BIGINT NOT NULL,
         pair_no INTEGER NOT NULL,
@@ -62,6 +79,7 @@ MIGRATIONS = [
         source_key TEXT NOT NULL,
         source_kind TEXT NOT NULL,
         target_input TEXT NOT NULL,
+        target_key TEXT,
         target_chat_id BIGINT,
         target_title TEXT,
         scan_count INTEGER,
@@ -78,16 +96,19 @@ MIGRATIONS = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (user_id, pair_no)
     )
-    ''',
-    '''
+    """,
+    "ALTER TABLE pairs ADD COLUMN IF NOT EXISTS target_key TEXT",
+    """
     CREATE TABLE IF NOT EXISTS runtime_meta (
         key TEXT PRIMARY KEY,
         value_json JSONB NOT NULL DEFAULT '{}'::jsonb,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
-    ''',
+    """,
 ]
+
 
 async def migrate() -> None:
     for sql in MIGRATIONS:
         await execute(sql)
+        
