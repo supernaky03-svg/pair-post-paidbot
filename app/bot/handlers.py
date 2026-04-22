@@ -1348,12 +1348,27 @@ async def message_router(message: Message, state: FSMContext) -> None:
         await _set_step(state, AddPairStates.waiting_source, prompt_key="source_prompt", markup_payload={"type": "flow_nav", "prefix": "flow"})
         await _show_step(message, state, t(language, "source_prompt"), reply_markup=text_step_keyboard("flow", language))
         return
-
-    if current_state == AddPairStates.waiting_source.state:
+    
+    if current_state == AddPairStates.waiting_target.state:
         await _cleanup_user_message(message)
-        await state.update_data(source_input=message.text.strip())
-        await _set_step(state, AddPairStates.waiting_scan, prompt_key="scan_prompt", markup_payload={"type": "flow_nav", "prefix": "flow"})
-        await _show_step(message, state, t(language, "scan_prompt"), reply_markup=text_step_keyboard("flow", language))
+        target_input = message.text.strip()
+        try:
+            prepared_target = await pair_service.prepare_target_for_confirmation(target_input)
+        except Exception as exc:
+            await _show_step(message, state, f"Target join failed: {exc}", reply_markup=text_step_keyboard("flow", language))
+            return
+        await state.update_data(
+            target_input=target_input,
+            temp_target_input=target_input,
+            temp_target_key=prepared_target["target_key"],
+            temp_target_chat_id=prepared_target["target_chat_id"],
+            temp_target_title=prepared_target["target_title"],
+            temp_target_joined=True,
+            temp_target_committed=False,
+        )
+        await message.answer(await _target_admin_warning_text(language, target_input))
+        await _set_step(state, AddPairStates.waiting_ads, prompt_key="ads_prompt", markup_payload={"type": "flow_nav", "prefix": "flow"})
+        await _show_step(message, state, t(language, "ads_prompt"), reply_markup=text_step_keyboard("flow", language))
         return
 
     if current_state == AddPairStates.waiting_scan.state:
@@ -1435,20 +1450,41 @@ async def message_router(message: Message, state: FSMContext) -> None:
         await _show_step(message, state, summary, reply_markup=confirm_keyboard("edit_source_confirm", language))
         return
 
-    if current_state == EditTargetStates.waiting_pair_no.state:
+    if current_state == EditTargetStates.waiting_target.state:
         await _cleanup_user_message(message)
+        target_input = message.text.strip()
         try:
-            pair_no = int(message.text.strip())
-        except Exception:
-            await _show_step(message, state, t(language, "invalid_number"), reply_markup=text_step_keyboard("flow", language))
+            prepared_target = await pair_service.prepare_target_for_confirmation(target_input)
+        except Exception as exc:
+            await _show_step(message, state, f"Target join failed: {exc}", reply_markup=text_step_keyboard("flow", language))
             return
-        pair = await pair_repo.get(message.from_user.id, pair_no)
-        if not pair or not pair.active:
-            await _show_step(message, state, t(language, "pair_not_found"), reply_markup=text_step_keyboard("flow", language))
-            return
-        await state.update_data(pair_no=pair_no)
-        await _set_step(state, EditTargetStates.waiting_target, prompt_key="send_new_target", markup_payload={"type": "flow_nav", "prefix": "flow"})
-        await _show_step(message, state, t(language, "send_new_target"), reply_markup=text_step_keyboard("flow", language))
+        await state.update_data(
+            target_input=target_input,
+            temp_target_input=target_input,
+            temp_target_key=prepared_target["target_key"],
+            temp_target_chat_id=prepared_target["target_chat_id"],
+            temp_target_title=prepared_target["target_title"],
+            temp_target_joined=True,
+            temp_target_committed=False,
+        )
+        info = await state.get_data()
+        summary = f"#{info['pair_no']}\n{t(language, 'summary_target')}: {info['target_input']}"
+        warning_text = await _target_admin_warning_text(language, info["target_input"])
+        gate_payload = {
+            "type": "target_admin_gate",
+            "prefix": "edit_target_admin",
+            "target_input": info["target_input"],
+            "failed": False,
+        }
+        await _set_step(
+            state,
+            EditTargetStates.waiting_confirm,
+            prompt_key="send_new_target",
+            markup_payload=gate_payload,
+            panel_text=warning_text,
+        )
+        await state.update_data(summary_text=summary)
+        await _show_step(message, state, warning_text, reply_markup=target_admin_keyboard("edit_target_admin", language))
         return
 
     if current_state == EditTargetStates.waiting_target.state:
