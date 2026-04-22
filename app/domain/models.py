@@ -37,6 +37,7 @@ class PairRecord:
     last_processed_id: int = 0
     recent_sent_ids: list[int] = field(default_factory=list)
     forward_rule: bool = False
+    remove_url_rule: bool = True
     post_rule: bool = True
     keyword_mode: str = "off"
     keyword_values: list[str] = field(default_factory=list)
@@ -83,4 +84,4 @@ class RuntimePairContext:
     source_chat_id: int | None = None
     target_chat_id: int | None = None
     last_sent_grouped_ids: set[int] = field(default_factory=set)
-  
+    
