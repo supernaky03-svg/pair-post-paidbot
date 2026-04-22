@@ -2,16 +2,42 @@ from __future__ import annotations
 
 import asyncio
 import random
+import re
 from collections import defaultdict
 from typing import Any, Iterable
 
 from app.core.config import settings
 from app.domain.models import PairRecord
-from app.telegram.safe_ops import safe_get_messages, safe_send_album, safe_send_file, safe_send_message
+from app.telegram.safe_ops import (
+    safe_get_messages,
+    safe_send_album,
+    safe_send_file,
+    safe_send_message,
+)
+
+# Remove common ad/share links from outgoing text while keeping the rest intact.
+LINK_RE = re.compile(r"(?i)\b(?:https?://|www\.|t\.me/|telegram\.me/)\S+")
+USERNAME_RE = re.compile(r"(?<!\w)@[A-Za-z0-9_]{3,32}\b")
 
 
 def message_text(msg: Any) -> str:
     return ((getattr(msg, "message", None) or "") or (getattr(msg, "raw_text", None) or "")).strip()
+
+
+def strip_links_preserve_text(text: str) -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+
+    cleaned_lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = LINK_RE.sub("", raw_line)
+        line = USERNAME_RE.sub("", line)
+        line = re.sub(r"[ \t]{2,}", " ", line).strip()
+        if line:
+            cleaned_lines.append(line)
+
+    return "\n".join(cleaned_lines).strip()
 
 
 def is_forwarded(msg: Any) -> bool:
@@ -80,14 +106,15 @@ def append_ads(text: str, ads: list[str]) -> str:
 
 
 def build_single_text(pair: PairRecord, msg: Any) -> str:
-    return append_ads(message_text(msg), pair.ads)
+    cleaned = strip_links_preserve_text(message_text(msg))
+    return append_ads(cleaned, pair.ads)
 
 
 def build_album_captions(pair: PairRecord, album: list[Any]) -> list[str]:
     ads_text = "\n".join(a.strip() for a in pair.ads if a.strip())
     captions: list[str] = []
     for index, msg in enumerate(album):
-        text = message_text(msg)
+        text = strip_links_preserve_text(message_text(msg))
         if index == 0 and ads_text:
             captions.append(f"{text}\n\n{ads_text}".strip())
         else:
@@ -164,7 +191,7 @@ async def send_album(pair: PairRecord, target_entity, album: list[Any], *, bypas
     if files:
         await safe_send_album(target_entity, files, captions)
     else:
-        text = append_ads(collect_album_text(album), pair.ads)
+        text = append_ads(strip_links_preserve_text(collect_album_text(album)), pair.ads)
         if text:
             await safe_send_message(target_entity, text)
 
