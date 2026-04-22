@@ -1038,19 +1038,17 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
         return
 
     if data.startswith("edit_source_confirm:") and current_state == EditSourceStates.waiting_confirm.state:
-        action = data.split(":", 1)[1]
-        if action == "yes":
-            info = await state.get_data()
-            try:
-                await pair_service.update_source(call.from_user.id, info["pair_no"], info["source_input"], info["scan_count"])
-            except Exception as exc:
-                await _show_step(call, state, f"Update failed: {exc}", reply_markup=None)
-            else:
-                runtime_manager.clear_cache()
-                await _show_step(call, state, t(language, "pair_updated"), reply_markup=None)
-            await state.clear()
-            await _restore_main_menu(call, language)
-        return
+    action = data.split(":", 1)[1]
+    if action == "yes":
+        info = await state.get_data()
+        try:
+            await pair_service.update_source(
+                call.from_user.id,
+                info["pair_no"],
+                info["source_input"],
+                info["scan_count"],
+                info["remove_url_rule"],
+			)
 
     if data.startswith("edit_target_admin:") and current_state == EditTargetStates.waiting_confirm.state:
         action = data.split(":", 1)[1]
@@ -1254,19 +1252,41 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
         return
 
     if data.startswith("rule_pair:") and current_state == RuleStates.waiting_pair.state:
-        choice = data.split(":", 1)[1]
-        if choice.isdigit():
-            await state.update_data(pair_no=int(choice))
-            info = await state.get_data()
-            prefix = "set_forward" if info["field_name"] == "forward_rule" else "set_post"
-            await _set_step(state, RuleStates.waiting_value, prompt_key="rule_choose_value", markup_payload={"type": "rule_value", "prefix": prefix})
-            await _show_step(call, state, t(language, "rule_choose_value"), reply_markup=rule_keyboard(prefix, language))
-        return
+		choice = data.split(":", 1)[1]
+		if choice.isdigit():
+			await state.update_data(pair_no=int(choice))
+			info = await state.get_data()
+			
+			if info["field_name"] == "forward_rule":
+				prefix = "set_forward"
+			elif info["field_name"] == "post_rule":
+				prefix = "set_post"
+			else:
+				prefix = "set_remove_url"
 
-    if (data.startswith("set_forward:") or data.startswith("set_post:")) and current_state == RuleStates.waiting_value.state:
-        action = data.split(":", 1)[1]
-        info = await state.get_data()
-        await pair_service.update_rule(call.from_user.id, info["pair_no"], field_name=info["field_name"], value=(action == "on"))
+            await _set_step(
+                state,
+                RuleStates.waiting_value,
+                prompt_key="rule_choose_value",
+                markup_payload={"type": "rule_value", "prefix": prefix},
+            )
+            await _show_step(
+                call,
+                state,
+                t(language, "rule_choose_value"),
+                reply_markup=rule_keyboard(prefix, language),
+            )
+        return
+	
+    if (data.startswith("set_forward:") or data.startswith("set_post:") or data.startswith("set_remove_url:")) and current_state == RuleStates.waiting_value.state:
+		action = data.split(":", 1)[1]
+		info = await state.get_data()
+		await pair_service.update_rule(
+			call.from_user.id,
+            info["pair_no"],
+            field_name=info["field_name"],
+            value=(action == "on"),
+        )
         await _show_step(call, state, t(language, "rule_updated"), reply_markup=None)
         await state.clear()
         await _show_main_menu(call, language)
@@ -1380,15 +1400,35 @@ async def message_router(message: Message, state: FSMContext) -> None:
         await _set_step(state, AdsStates.waiting_action, prompt_key="ads_intro", markup_payload={"type": "ads_actions"}, remember=False)
         await _show_step(message, state, t(language, "ads_intro"), reply_markup=ads_action_keyboard(language), reset_panel=True)
         return
-    if action in {"forward_rule", "post_rule"}:
-        field_name = "forward_rule" if action == "forward_rule" else "post_rule"
+    if action in {"forward_rule", "post_rule", "remove_url_rule"}:
+		if action == "forward_rule":
+			field_name = "forward_rule":
+			prompt_key = "rule_forward_explain"
+		elif action == "post_rule":
+			field_name = "post_rule"
+			prompt_key = "rule_post_explain"
+		else:
+			field_name = "remove_url_rule"
+			prompt_key = "rule_remove_url_explain"
+
         await state.clear()
         await _remove_main_menu(message)
         await state.update_data(field_name=field_name)
-        prompt_key = "rule_forward_explain" if field_name == "forward_rule" else "rule_post_explain"
-        await _set_step(state, RuleStates.waiting_pair, prompt_key=prompt_key, markup_payload={"type": "pair_picker", "prefix": "rule_pair", "include_all": False}, remember=False)
+        await _set_step(
+            state,
+            RuleStates.waiting_pair,
+            prompt_key=prompt_key,
+            markup_payload={"type": "pair_picker", "prefix": "rule_pair", "include_all": False},
+            remember=False,
+        )
         pairs = await pair_repo.list_for_user(message.from_user.id)
-        await _show_step(message, state, t(language, prompt_key), reply_markup=pair_picker("rule_pair", pairs, language), reset_panel=True)
+        await _show_step(
+            message,
+            state,
+            t(language, prompt_key),
+            reply_markup=pair_picker("rule_pair", pairs, language),
+            reset_panel=True,
+        )
         return
     if action == "check":
         await state.clear()
@@ -1521,19 +1561,56 @@ async def message_router(message: Message, state: FSMContext) -> None:
         return
 
     if current_state == EditSourceStates.waiting_scan.state:
-        await _cleanup_user_message(message)
-        try:
-            scan_count = pair_service.parse_scan_count(message.text.strip())
-        except Exception:
-            await _show_step(message, state, t(language, "invalid_scan"), reply_markup=text_step_keyboard("flow", language))
-            return
-        await state.update_data(scan_count=scan_count)
-        info = await state.get_data()
-        summary = f"#{info['pair_no']}\n{t(language, 'summary_source')}: {info['source_input']}\n{t(language, 'summary_scan')}: {'all' if scan_count is None else scan_count}"
-        await _set_step(state, EditSourceStates.waiting_confirm, prompt_key="edit_source_confirm", markup_payload={"type": "edit_source_confirm"})
-        await _show_step(message, state, summary, reply_markup=confirm_keyboard("edit_source_confirm", language))
+		await _cleanup_user_message(message)
+		try:
+			scan_count = pair_service.parse_scan_count(message.text.strip())
+		except Exception:
+			await _show_step(message, state, t(language, "invalid_scan"), reply_markup=text_step_keyboard("flow", language))
+			return
+			
+	    await state.update_data(scan_count=scan_count)
+        await _set_step(
+            state,
+            EditSourceStates.waiting_remove_url_rule,
+            prompt_key="rule_remove_url_explain",
+            markup_payload={"type": "edit_source_remove_url_rule"},
+        )
+        await _show_step(
+            message,
+            state,
+            t(language, "rule_remove_url_explain"),
+            reply_markup=rule_keyboard("edit_source_remove_url", language),
+        )
         return
 
+    if data.startswith("edit_source_remove_url:") and current_state == EditSourceStates.waiting_remove_url_rule.state:
+        value = data.split(":", 1)[1]
+        await state.update_data(remove_url_rule=(value == "on"))
+        
+        info = await state.get_data()
+        scan = "all" if info["scan_count"] is None else str(info["scan_count"])
+        summary = (
+            f"#{info['pair_no']}\n"
+            f"{t(language, 'summary_source')}: {info['source_input']}\n"
+            f"{t(language, 'summary_scan')}: {scan}\n"
+            f"{t(language, 'summary_remove_url_rule')}: {'ON' if info['remove_url_rule'] else 'OFF'}"
+        )
+		
+		await state.update_data(summary_text=summary)
+        await _set_step(
+            state,
+            EditSourceStates.waiting_confirm,
+            prompt_key="edit_source_confirm",
+            markup_payload={"type": "edit_source_confirm"},
+        )
+        await _show_step(
+            call,
+            state,
+            summary,
+            reply_markup=confirm_keyboard("edit_source_confirm", language),
+        )
+        return
+    
     if current_state == EditTargetStates.waiting_pair_no.state:
         await _cleanup_user_message(message)
         try:
