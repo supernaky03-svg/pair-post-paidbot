@@ -294,10 +294,11 @@ async def _cleanup_user_message(message: Message) -> None:
 
 
 async def _sync_reply_keyboard(target: Message | CallbackQuery, reply_markup) -> None:
+    invisible = "\u2063"
     if isinstance(target, Message):
-        await target.answer(" ", reply_markup=reply_markup)
+        await target.answer(invisible, reply_markup=reply_markup)
     else:
-        await target.message.answer(" ", reply_markup=reply_markup)
+        await target.message.answer(invisible, reply_markup=reply_markup)
 
 
 async def _remove_main_menu(target: Message | CallbackQuery) -> None:
