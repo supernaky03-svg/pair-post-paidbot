@@ -215,6 +215,7 @@ class PairRepo:
             last_processed_id=row.get("last_processed_id") or 0,
             recent_sent_ids=list(recent),
             forward_rule=bool(row.get("forward_rule")),
+            remove_url_rule=bool(row.get("remove_url_rule", True)),
             post_rule=bool(row.get("post_rule")),
             keyword_mode=row.get("keyword_mode") or "off",
             keyword_values=list(keywords),
@@ -248,9 +249,9 @@ class PairRepo:
             INSERT INTO pairs (
                 user_id, pair_no, source_input, source_key, source_kind, target_input, target_key,
                 target_chat_id, target_title, scan_count, last_processed_id, recent_sent_ids,
-                forward_rule, post_rule, keyword_mode, keyword_values, ads, active, generation, updated_at
+                forward_rule, remove_url_rule, post_rule, keyword_mode, keyword_values, ads, active, generation, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, NOW())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, NOW())
             ON CONFLICT (user_id, pair_no) DO UPDATE SET
                 source_input = EXCLUDED.source_input,
                 source_key = EXCLUDED.source_key,
@@ -263,6 +264,7 @@ class PairRepo:
                 last_processed_id = EXCLUDED.last_processed_id,
                 recent_sent_ids = EXCLUDED.recent_sent_ids,
                 forward_rule = EXCLUDED.forward_rule,
+                remove_url_rule = EXCLUDED.remove_url_rule,
                 post_rule = EXCLUDED.post_rule,
                 keyword_mode = EXCLUDED.keyword_mode,
                 keyword_values = EXCLUDED.keyword_values,
@@ -285,6 +287,7 @@ class PairRepo:
                 pair.last_processed_id,
                 json.dumps(pair.recent_sent_ids[-settings.recent_ids_limit :]),
                 pair.forward_rule,
+                pair.remove_url_rule,
                 pair.post_rule,
                 pair.keyword_mode,
                 json.dumps(pair.keyword_values),
