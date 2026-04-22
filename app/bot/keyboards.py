@@ -33,10 +33,11 @@ def main_menu(language: str) -> ReplyKeyboardMarkup:
             [
                 KeyboardButton(text=t(language, "menu_forward_rule")),
                 KeyboardButton(text=t(language, "menu_post_rule")),
-                KeyboardButton(text=t(language, "menu_language")),
+                KeyboardButton(text=t(language, "menu_remove_url_rule")),
             ],
             [
                 KeyboardButton(text=t(language, "menu_contact")),
+                KeyboardButton(text=t(language, "menu_language")),
             ],
         ],
         resize_keyboard=True,
