@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from app.db.repositories import PairRepo, SourceRepo
 from app.domain.models import PairRecord, SourceRecord
-from app.telegram.entity import leave_source
+from app.telegram.entity import leave_source, resolve_source
 
 
 class SourceRegistryService:
@@ -59,3 +59,26 @@ class SourceRegistryService:
             await self.sources.save(source)
             return True
         return False
+
+    async def rejoin_private_sources_for_current_session(self) -> list[str]:
+        touched: list[str] = []
+        all_active = await self.pairs.list_all_active()
+        active_keys = {item.source_key for item in all_active}
+        for source in await self.sources.list_joined_private():
+            if source.source_key not in active_keys:
+                continue
+            try:
+                resolved = await resolve_source(source.source_input)
+                source.joined_by_shared_session = resolved.joined_by_shared_session
+                source.chat_id = resolved.chat_id
+                source.title = resolved.title
+                source.last_error = None
+                source.last_verified_at = datetime.now(timezone.utc)
+                await self.sources.save(source)
+                touched.append(source.source_key)
+            except Exception as exc:
+                source.last_error = str(exc)
+                source.last_verified_at = datetime.now(timezone.utc)
+                await self.sources.save(source)
+        return touched
+        
