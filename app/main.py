@@ -33,7 +33,7 @@ async def main() -> None:
     reconcile_service = SessionReconcileService()
     await reconcile_service.run(bot)
 
-    await runtime_manager.start()
+    await runtime_manager.start(bot)
     health_runner = await start_health_server(settings.health_port)
     logger.info("Bot + runtime started.")
 
@@ -48,4 +48,4 @@ async def main() -> None:
         await close_pool()
         await bot.session.close()
         await health_runner.cleanup()
-        
+
