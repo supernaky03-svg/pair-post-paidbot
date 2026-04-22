@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import asyncio
@@ -62,7 +61,6 @@ class RuntimeManager:
                 await self.scan_all_pairs()
             except Exception:
                 logger.exception("Runtime scan cycle failed")
-
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=settings.poll_interval_seconds)
             except asyncio.TimeoutError:
@@ -99,39 +97,60 @@ class RuntimeManager:
             cache["target"] = await resolve_target(pair.target_input)
         return cache["source"], cache["target"]
 
+    async def _collect_messages(self, pair: PairRecord, source_entity):
+        last_id = int(pair.last_processed_id or 0)
+        if last_id == 0:
+            latest = await safe_get_messages(source_entity, limit=pair.scan_count or None)
+            return sorted([m for m in latest], key=lambda x: x.id)
+
+        msgs = []
+        async for msg in client.iter_messages(source_entity, min_id=last_id, reverse=True):
+            msgs.append(msg)
+        return msgs
+
     async def scan_pair(self, pair: PairRecord) -> None:
         source_lock = runtime_cache.source_locks[pair.source_key]
-        target_key = str(pair.target_chat_id or pair.target_input)
-        target_lock = runtime_cache.target_locks[target_key]
-
         self._active_checks[pair.source_key] += 1
         try:
             async with source_lock:
                 source_entity, target_entity = await self._ensure_entities(pair)
-                last_id = int(pair.last_processed_id or 0)
-                grouped_seen: set[int] = set()
-
-                if last_id == 0:
-                    latest = await safe_get_messages(source_entity, limit=pair.scan_count or None)
-                    msgs = sorted([m for m in latest], key=lambda x: x.id)
-                else:
-                    msgs = []
-                    async for msg in client.iter_messages(source_entity, min_id=last_id, reverse=True):
-                        msgs.append(msg)
-
-                async with target_lock:
-                    for msg in msgs:
-                        grouped_id = getattr(msg, "grouped_id", None)
-                        if grouped_id:
-                            if grouped_id in grouped_seen:
-                                continue
-                            grouped_seen.add(grouped_id)
-                            album = await collect_grouped_messages(source_entity, msg)
-                            await self.process_album(pair, source_entity, target_entity, album)
-                        else:
-                            await self.process_single(pair, source_entity, target_entity, msg)
+                msgs = await self._collect_messages(pair, source_entity)
+            await self._process_messages(pair, source_entity, target_entity, msgs)
         finally:
             self._active_checks[pair.source_key] = max(0, self._active_checks[pair.source_key] - 1)
+
+    async def scan_pair_manual(self, pair: PairRecord) -> None:
+        """
+        Manual Check path:
+        - bypasses poll interval entirely
+        - does not wait for source_lock, so it can fetch immediately even if background
+          scan is currently busy collecting/sending for the same source
+        - still uses target_lock through _process_messages to avoid overlapping sends
+        """
+        self._active_checks[pair.source_key] += 1
+        try:
+            source_entity, target_entity = await self._ensure_entities(pair)
+            msgs = await self._collect_messages(pair, source_entity)
+            await self._process_messages(pair, source_entity, target_entity, msgs)
+        finally:
+            self._active_checks[pair.source_key] = max(0, self._active_checks[pair.source_key] - 1)
+
+    async def _process_messages(self, pair: PairRecord, source_entity, target_entity, msgs) -> None:
+        target_key = str(pair.target_chat_id or pair.target_input)
+        target_lock = runtime_cache.target_locks[target_key]
+        grouped_seen: set[int] = set()
+
+        async with target_lock:
+            for msg in msgs:
+                grouped_id = getattr(msg, "grouped_id", None)
+                if grouped_id:
+                    if grouped_id in grouped_seen:
+                        continue
+                    grouped_seen.add(grouped_id)
+                    album = await collect_grouped_messages(source_entity, msg)
+                    await self.process_album(pair, source_entity, target_entity, album)
+                else:
+                    await self.process_single(pair, source_entity, target_entity, msg)
 
     def is_busy(self, pair: PairRecord) -> bool:
         return self._active_checks.get(pair.source_key, 0) > 0
@@ -167,8 +186,7 @@ class RuntimeManager:
 
         main_allowed = should_process_album(pair, album)
         if pair.post_rule and any(is_video_message(m) for m in album) and main_allowed:
-            first_id = min(ids)
-            prev = await self._find_previous_message_before(source_entity, first_id)
+            prev = await self._find_previous_message_before(source_entity, min(ids))
             if prev:
                 if getattr(prev, "grouped_id", None):
                     preview_album = await collect_grouped_messages(source_entity, prev)
@@ -210,6 +228,15 @@ class RuntimeManager:
                 pair.target_input,
             )
 
+    async def _find_previous_message_before(self, source_entity, current_id: int):
+        if current_id <= 1:
+            return None
+
+        async for prev in client.iter_messages(source_entity, offset_id=current_id, reverse=False, limit=10):
+            if int(prev.id) < current_id:
+                return prev
+        return None
+
     async def _send_preview_for_message(self, pair: PairRecord, source_entity, target_entity, msg) -> None:
         prev = await self._find_previous_message_before(source_entity, int(msg.id))
         if not prev:
@@ -233,27 +260,4 @@ class RuntimeManager:
             ):
                 await send_single(pair, target_entity, prev)
                 pair.recent_sent_ids = (pair.recent_sent_ids + [prev_id])[-200:]
-
-    async def _find_previous_message_before(self, source_entity, before_id: int):
-        """
-        Find the nearest real previous message before `before_id`.
-
-        This avoids relying on `before_id - 1`, which fails when channel IDs have
-        gaps because of deleted/service messages.
-        """
-        async for prev in client.iter_messages(source_entity, offset_id=before_id):
-            prev_id = int(getattr(prev, "id", 0) or 0)
-            if prev_id <= 0 or prev_id >= before_id:
-                continue
-
-            if (
-                getattr(prev, "action", None)
-                and not getattr(prev, "media", None)
-                and not getattr(prev, "message", None)
-            ):
-                continue
-
-            return prev
-
-        return None
             
