@@ -7,7 +7,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.db.connection import execute, fetch_all, fetch_one
-from app.domain.models import PairRecord, SourceRecord, UserRecord
+from app.domain.models import PairRecord, SourceRecord, TargetRecord, UserRecord
 
 
 def _utcnow() -> datetime:
@@ -208,6 +208,7 @@ class PairRepo:
             source_key=row["source_key"],
             source_kind=row["source_kind"],
             target_input=row["target_input"],
+            target_key=row.get("target_key"),
             target_chat_id=row.get("target_chat_id"),
             target_title=row.get("target_title"),
             scan_count=row.get("scan_count"),
@@ -245,16 +246,17 @@ class PairRepo:
         await execute(
             '''
             INSERT INTO pairs (
-                user_id, pair_no, source_input, source_key, source_kind, target_input,
+                user_id, pair_no, source_input, source_key, source_kind, target_input, target_key,
                 target_chat_id, target_title, scan_count, last_processed_id, recent_sent_ids,
                 forward_rule, post_rule, keyword_mode, keyword_values, ads, active, generation, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, NOW())
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, NOW())
             ON CONFLICT (user_id, pair_no) DO UPDATE SET
                 source_input = EXCLUDED.source_input,
                 source_key = EXCLUDED.source_key,
                 source_kind = EXCLUDED.source_kind,
                 target_input = EXCLUDED.target_input,
+                target_key = EXCLUDED.target_key,
                 target_chat_id = EXCLUDED.target_chat_id,
                 target_title = EXCLUDED.target_title,
                 scan_count = EXCLUDED.scan_count,
@@ -276,6 +278,7 @@ class PairRepo:
                 pair.source_key,
                 pair.source_kind,
                 pair.target_input,
+                pair.target_key,
                 pair.target_chat_id,
                 pair.target_title,
                 pair.scan_count,
@@ -372,6 +375,71 @@ class SourceRepo:
         )
 
 
+class TargetRepo:
+    def _row_to_target(self, row: dict[str, Any]) -> TargetRecord:
+        return TargetRecord(
+            target_key=row["target_key"],
+            target_input=row["target_input"],
+            target_kind=row["target_kind"],
+            normalized_value=row["normalized_value"],
+            invite_hash=row.get("invite_hash"),
+            joined_by_shared_session=bool(row.get("joined_by_shared_session")),
+            active_pair_reference_count=row.get("active_pair_reference_count") or 0,
+            chat_id=row.get("chat_id"),
+            title=row.get("title"),
+            last_verified_at=row.get("last_verified_at"),
+            last_error=row.get("last_error"),
+            last_session_fingerprint=row.get("last_session_fingerprint"),
+        )
+
+    async def get(self, target_key: str) -> TargetRecord | None:
+        row = await fetch_one("SELECT * FROM targets WHERE target_key = %s", (target_key,))
+        return self._row_to_target(row) if row else None
+
+    async def list_all(self) -> list[TargetRecord]:
+        rows = await fetch_all("SELECT * FROM targets ORDER BY target_kind, target_input")
+        return [self._row_to_target(r) for r in rows]
+
+    async def save(self, target: TargetRecord) -> None:
+        await execute(
+            """
+            INSERT INTO targets (
+                target_key, target_input, target_kind, normalized_value, invite_hash,
+                joined_by_shared_session, active_pair_reference_count, chat_id, title,
+                last_verified_at, last_error, last_session_fingerprint, updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (target_key) DO UPDATE SET
+                target_input = EXCLUDED.target_input,
+                target_kind = EXCLUDED.target_kind,
+                normalized_value = EXCLUDED.normalized_value,
+                invite_hash = EXCLUDED.invite_hash,
+                joined_by_shared_session = EXCLUDED.joined_by_shared_session,
+                active_pair_reference_count = EXCLUDED.active_pair_reference_count,
+                chat_id = EXCLUDED.chat_id,
+                title = EXCLUDED.title,
+                last_verified_at = EXCLUDED.last_verified_at,
+                last_error = EXCLUDED.last_error,
+                last_session_fingerprint = EXCLUDED.last_session_fingerprint,
+                updated_at = NOW()
+            """,
+            (
+                target.target_key,
+                target.target_input,
+                target.target_kind,
+                target.normalized_value,
+                target.invite_hash,
+                target.joined_by_shared_session,
+                target.active_pair_reference_count,
+                target.chat_id,
+                target.title,
+                target.last_verified_at,
+                target.last_error,
+                target.last_session_fingerprint,
+            ),
+        )
+
+
 class SettingsRepo:
     async def get_json(self, key: str, default: dict[str, Any] | None = None) -> dict[str, Any]:
         row = await fetch_one("SELECT value_json FROM global_settings WHERE key = %s", (key,))
@@ -386,3 +454,4 @@ class SettingsRepo:
             ''',
             (key, json.dumps(value)),
         )
+        
