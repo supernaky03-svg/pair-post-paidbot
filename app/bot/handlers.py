@@ -1038,18 +1038,26 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
         return
 
     if data.startswith("edit_source_confirm:") and current_state == EditSourceStates.waiting_confirm.state:
-    action = data.split(":", 1)[1]
-    if action == "yes":
-        info = await state.get_data()
-        try:
-            await pair_service.update_source(
-                call.from_user.id,
-                info["pair_no"],
-                info["source_input"],
-                info["scan_count"],
-                info["remove_url_rule"],
-			)
-
+        action = data.split(":", 1)[1]
+        if action == "yes":
+            info = await state.get_data()
+            try:
+                await pair_service.update_source(
+                    call.from_user.id,
+                    info["pair_no"],
+                    info["source_input"],
+                    info["scan_count"],
+                    info["remove_url_rule"],
+			    )	
+            except Exception as exc:
+                await _show_step(call, state, f"Update failed: {exc}", reply_markup=None)
+            else:
+                runtime_manager.clear_cache()
+                await _show_step(call, state, t(language, "pair_updated"), reply_markup=None)
+            await state.clear()
+            await _restore_main_menu(call, language)
+        return
+		
     if data.startswith("edit_target_admin:") and current_state == EditTargetStates.waiting_confirm.state:
         action = data.split(":", 1)[1]
         if action == "done":
