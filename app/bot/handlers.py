@@ -1057,6 +1057,34 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             await state.clear()
             await _restore_main_menu(call, language)
         return
+
+    if data.startswith("edit_source_remove_url:") and current_state == EditSourceStates.waiting_remove_url_rule.state:
+        value = data.split(":", 1)[1]
+        await state.update_data(remove_url_rule=(value == "on"))
+        
+        info = await state.get_data()
+        scan = "all" if info["scan_count"] is None else str(info["scan_count"])
+        summary = (
+            f"#{info['pair_no']}\n"
+            f"{t(language, 'summary_source')}: {info['source_input']}\n"
+            f"{t(language, 'summary_scan')}: {scan}\n"
+            f"{t(language, 'summary_remove_url_rule')}: {'ON' if info['remove_url_rule'] else 'OFF'}"
+        )
+        
+        await state.update_data(summary_text=summary)
+        await _set_step(
+            state,
+            EditSourceStates.waiting_confirm,
+            prompt_key="edit_source_confirm",
+            markup_payload={"type": "edit_source_confirm"},
+        )
+        await _show_step(
+            call,
+            state,
+            summary,
+            reply_markup=confirm_keyboard("edit_source_confirm", language),
+        )
+        return
         
     if data.startswith("edit_target_admin:") and current_state == EditTargetStates.waiting_confirm.state:
         action = data.split(":", 1)[1]
@@ -1597,34 +1625,6 @@ async def message_router(message: Message, state: FSMContext) -> None:
             state,
             t(language, "rule_remove_url_explain"),
             reply_markup=rule_keyboard("edit_source_remove_url", language),
-        )
-        return
-
-    if data.startswith("edit_source_remove_url:") and current_state == EditSourceStates.waiting_remove_url_rule.state:
-        value = data.split(":", 1)[1]
-        await state.update_data(remove_url_rule=(value == "on"))
-        
-        info = await state.get_data()
-        scan = "all" if info["scan_count"] is None else str(info["scan_count"])
-        summary = (
-            f"#{info['pair_no']}\n"
-            f"{t(language, 'summary_source')}: {info['source_input']}\n"
-            f"{t(language, 'summary_scan')}: {scan}\n"
-            f"{t(language, 'summary_remove_url_rule')}: {'ON' if info['remove_url_rule'] else 'OFF'}"
-        )
-        
-        await state.update_data(summary_text=summary)
-        await _set_step(
-            state,
-            EditSourceStates.waiting_confirm,
-            prompt_key="edit_source_confirm",
-            markup_payload={"type": "edit_source_confirm"},
-        )
-        await _show_step(
-            call,
-            state,
-            summary,
-            reply_markup=confirm_keyboard("edit_source_confirm", language),
         )
         return
     
