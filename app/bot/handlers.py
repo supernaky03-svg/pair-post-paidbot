@@ -1705,13 +1705,15 @@ async def message_router(message: Message, state: FSMContext) -> None:
         return
 
     if current_state == AdsStates.waiting_values.state:
-        await _cleanup_user_message(message)
-        info = await state.get_data()
-        ads = pair_service.normalize_ads(message.text)
-        await pair_service.update_ads(message.from_user.id, info["pair_no"], ads)
-        await _show_step(message, state, t(language, "ads_updated"), reply_markup=None)
-        await state.clear()
-        await _restore_main_menu(message, language)
+        try:
+            info = await state.get_data()
+            raw_text = (message.text or "").strip()
+            ads = pair_service.normalize_ads(raw_text)
+            await pair_service.update_ads(message.from_user.id, info["pair_no"], ads)
+            await message.answer(t(language, "ads_updated"), reply_markup=main_menu(language))
+            await state.clear()
+        except Exception as e:
+            await message.answer(f"Ads update failed: {e}", reply_markup=main_menu(language))
         return
 
     callback_only_states = {
