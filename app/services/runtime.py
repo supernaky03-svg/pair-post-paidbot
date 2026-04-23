@@ -61,8 +61,12 @@ class RuntimeManager:
                 await self.scan_all_pairs()
             except Exception:
                 logger.exception("Runtime scan cycle failed")
+
             try:
-                await asyncio.wait_for(self._stop.wait(), timeout=settings.poll_interval_seconds)
+                await asyncio.wait_for(
+                    self._stop.wait(),
+                    timeout=settings.poll_interval_seconds,
+                )
             except asyncio.TimeoutError:
                 continue
 
@@ -104,7 +108,11 @@ class RuntimeManager:
             return sorted([m for m in latest], key=lambda x: x.id)
 
         msgs = []
-        async for msg in client.iter_messages(source_entity, min_id=last_id, reverse=True):
+        async for msg in client.iter_messages(
+            source_entity,
+            min_id=last_id,
+            reverse=True,
+        ):
             msgs.append(msg)
         return msgs
 
@@ -115,16 +123,19 @@ class RuntimeManager:
             async with source_lock:
                 source_entity, target_entity = await self._ensure_entities(pair)
                 msgs = await self._collect_messages(pair, source_entity)
-            await self._process_messages(pair, source_entity, target_entity, msgs)
+                await self._process_messages(pair, source_entity, target_entity, msgs)
         finally:
-            self._active_checks[pair.source_key] = max(0, self._active_checks[pair.source_key] - 1)
+            self._active_checks[pair.source_key] = max(
+                0,
+                self._active_checks[pair.source_key] - 1,
+            )
 
     async def scan_pair_manual(self, pair: PairRecord) -> None:
         """
         Manual Check path:
         - bypasses poll interval entirely
-        - does not wait for source_lock, so it can fetch immediately even if background
-          scan is currently busy collecting/sending for the same source
+        - does not wait for source_lock, so it can fetch immediately even if
+          background scan is currently busy collecting/sending for the same source
         - still uses target_lock through _process_messages to avoid overlapping sends
         """
         self._active_checks[pair.source_key] += 1
@@ -133,7 +144,10 @@ class RuntimeManager:
             msgs = await self._collect_messages(pair, source_entity)
             await self._process_messages(pair, source_entity, target_entity, msgs)
         finally:
-            self._active_checks[pair.source_key] = max(0, self._active_checks[pair.source_key] - 1)
+            self._active_checks[pair.source_key] = max(
+                0,
+                self._active_checks[pair.source_key] - 1,
+            )
 
     async def _process_messages(self, pair: PairRecord, source_entity, target_entity, msgs) -> None:
         target_key = str(pair.target_chat_id or pair.target_input)
@@ -157,20 +171,30 @@ class RuntimeManager:
 
     async def process_single(self, pair: PairRecord, source_entity, target_entity, msg) -> None:
         msg_id = int(msg.id)
+
         if is_duplicate(pair, [msg_id]):
             pair.last_processed_id = max(pair.last_processed_id, msg_id)
             await self.pairs.save(pair)
             return
 
         main_allowed = should_process_single(pair, msg)
+
         if pair.post_rule and is_video_message(msg) and main_allowed:
-            await self._send_preview_for_message(pair, source_entity, target_entity, msg)
+            try:
+                await self._send_preview_for_message(pair, source_entity, target_entity, msg)
+            except Exception:
+                logger.exception(
+                    "Preview send failed for pair user_id=%s pair_no=%s msg_id=%s",
+                    pair.user_id,
+                    pair.pair_no,
+                    msg_id,
+                )
 
         if main_allowed:
-            await send_single(pair, target_entity, msg)
+            await send_single(pair, source_entity, target_entity, msg)
             await self.notifier.clear_for_pair(pair)
+            pair.recent_sent_ids = (pair.recent_sent_ids + [msg_id])[-200:]
 
-        pair.recent_sent_ids = (pair.recent_sent_ids + [msg_id])[-200:]
         pair.last_processed_id = max(pair.last_processed_id, msg_id)
         await self.pairs.save(pair)
 
@@ -179,39 +203,63 @@ class RuntimeManager:
             return
 
         ids = [int(m.id) for m in album]
+
         if is_duplicate(pair, ids):
             pair.last_processed_id = max(pair.last_processed_id, max(ids))
             await self.pairs.save(pair)
             return
 
         main_allowed = should_process_album(pair, album)
+
         if pair.post_rule and any(is_video_message(m) for m in album) and main_allowed:
-            prev = await self._find_previous_message_before(source_entity, min(ids))
-            if prev:
-                if getattr(prev, "grouped_id", None):
-                    preview_album = await collect_grouped_messages(source_entity, prev)
-                    preview_ids = [int(m.id) for m in preview_album]
-                    if (
-                        preview_album
-                        and not is_duplicate(pair, preview_ids)
-                        and should_process_album(pair, preview_album, bypass_post_rule=True)
-                    ):
-                        await send_album(pair, target_entity, preview_album, bypass_post_rule=True)
-                        pair.recent_sent_ids = (pair.recent_sent_ids + preview_ids)[-200:]
-                else:
-                    prev_id = int(prev.id)
-                    if (
-                        not is_duplicate(pair, [prev_id])
-                        and should_process_single(pair, prev, bypass_post_rule=True)
-                    ):
-                        await send_single(pair, target_entity, prev)
-                        pair.recent_sent_ids = (pair.recent_sent_ids + [prev_id])[-200:]
+            try:
+                prev = await self._find_previous_message_before(source_entity, min(ids))
+                if prev:
+                    if getattr(prev, "grouped_id", None):
+                        preview_album = await collect_grouped_messages(source_entity, prev)
+                        preview_ids = [int(m.id) for m in preview_album]
+                        if (
+                            preview_album
+                            and not is_duplicate(pair, preview_ids)
+                            and should_process_album(
+                                pair,
+                                preview_album,
+                                bypass_post_rule=True,
+                            )
+                        ):
+                            await send_album(
+                                pair,
+                                source_entity,
+                                target_entity,
+                                preview_album,
+                                bypass_post_rule=True,
+                            )
+                            pair.recent_sent_ids = (pair.recent_sent_ids + preview_ids)[-200:]
+                    else:
+                        prev_id = int(prev.id)
+                        if (
+                            not is_duplicate(pair, [prev_id])
+                            and should_process_single(
+                                pair,
+                                prev,
+                                bypass_post_rule=True,
+                            )
+                        ):
+                            await send_single(pair, source_entity, target_entity, prev)
+                            pair.recent_sent_ids = (pair.recent_sent_ids + [prev_id])[-200:]
+            except Exception:
+                logger.exception(
+                    "Album preview send failed for pair user_id=%s pair_no=%s album_ids=%s",
+                    pair.user_id,
+                    pair.pair_no,
+                    ids,
+                )
 
         if main_allowed:
-            await send_album(pair, target_entity, album)
+            await send_album(pair, source_entity, target_entity, album)
             await self.notifier.clear_for_pair(pair)
+            pair.recent_sent_ids = (pair.recent_sent_ids + ids)[-200:]
 
-        pair.recent_sent_ids = (pair.recent_sent_ids + ids)[-200:]
         pair.last_processed_id = max(pair.last_processed_id, max(ids))
         await self.pairs.save(pair)
 
@@ -231,8 +279,12 @@ class RuntimeManager:
     async def _find_previous_message_before(self, source_entity, current_id: int):
         if current_id <= 1:
             return None
-
-        async for prev in client.iter_messages(source_entity, offset_id=current_id, reverse=False, limit=10):
+        async for prev in client.iter_messages(
+            source_entity,
+            offset_id=current_id,
+            reverse=False,
+            limit=10,
+        ):
             if int(prev.id) < current_id:
                 return prev
         return None
@@ -248,16 +300,30 @@ class RuntimeManager:
             if (
                 preview_album
                 and not is_duplicate(pair, preview_ids)
-                and should_process_album(pair, preview_album, bypass_post_rule=True)
+                and should_process_album(
+                    pair,
+                    preview_album,
+                    bypass_post_rule=True,
+                )
             ):
-                await send_album(pair, target_entity, preview_album, bypass_post_rule=True)
+                await send_album(
+                    pair,
+                    source_entity,
+                    target_entity,
+                    preview_album,
+                    bypass_post_rule=True,
+                )
                 pair.recent_sent_ids = (pair.recent_sent_ids + preview_ids)[-200:]
         else:
             prev_id = int(prev.id)
             if (
                 not is_duplicate(pair, [prev_id])
-                and should_process_single(pair, prev, bypass_post_rule=True)
+                and should_process_single(
+                    pair,
+                    prev,
+                    bypass_post_rule=True,
+                )
             ):
-                await send_single(pair, target_entity, prev)
+                await send_single(pair, source_entity, target_entity, prev)
                 pair.recent_sent_ids = (pair.recent_sent_ids + [prev_id])[-200:]
-            
+                                
