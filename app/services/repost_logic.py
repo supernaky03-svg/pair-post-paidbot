@@ -6,6 +6,8 @@ import re
 from collections import defaultdict
 from typing import Any, Iterable
 
+from telethon.errors.rpcerrorlist import FileReferenceExpiredError
+
 from app.core.config import settings
 from app.domain.models import PairRecord
 from app.telegram.safe_ops import (
@@ -17,7 +19,7 @@ from app.telegram.safe_ops import (
 
 # Remove common ad/share links from outgoing text while keeping the rest intact.
 LINK_RE = re.compile(r"(?i)\b(?:https?://|www\.|t\.me/|telegram\.me/)\S+")
-USERNAME_RE = re.compile(r"(?i)(?<!\w)@[a-z0-9_]{5,32}\b")
+USERNAME_RE = re.compile(r"(?i)(?<!\w)@[A-Za-z0-9_]{4,}(?!\w)")
 
 
 def message_text(msg: Any) -> str:
@@ -52,15 +54,19 @@ def is_forwarded(msg: Any) -> bool:
 def is_video_message(msg: Any) -> bool:
     if getattr(msg, "video", False):
         return True
+
     media = getattr(msg, "media", None)
     if media is None:
         return False
+
     document = getattr(media, "document", None)
     if not document:
         return False
+
     for attr in getattr(document, "attributes", []):
         if attr.__class__.__name__.lower() == "documentattributevideo":
             return True
+
     mime_type = getattr(document, "mime_type", "") or ""
     return mime_type.startswith("video/")
 
@@ -78,7 +84,9 @@ def keyword_match(text: str, keywords: list[str]) -> bool:
 def pair_keyword_allows_text(pair: PairRecord, text: str) -> bool:
     if pair.keyword_mode == "off" or not pair.keyword_values:
         return True
+
     has_match = keyword_match(text, pair.keyword_values)
+
     if pair.keyword_mode == "ban":
         return not has_match
     if pair.keyword_mode == "post":
@@ -106,6 +114,7 @@ def append_ads(text: str, ads: list[str]) -> str:
     ads = [a.strip() for a in ads if a and a.strip()]
     if not ads:
         return text.strip()
+
     joined = "\n".join(ads)
     return f"{text.strip()}\n\n{joined}".strip() if text.strip() else joined
 
@@ -118,12 +127,14 @@ def build_single_text(pair: PairRecord, msg: Any) -> str:
 def build_album_captions(pair: PairRecord, album: list[Any]) -> list[str]:
     ads_text = "\n".join(a.strip() for a in pair.ads if a.strip())
     captions: list[str] = []
+
     for index, msg in enumerate(album):
         text = maybe_clean_text(pair, message_text(msg))
         if index == 0 and ads_text:
             captions.append(f"{text}\n\n{ads_text}".strip())
         else:
             captions.append(text)
+
     return captions
 
 
@@ -179,22 +190,72 @@ async def human_delay() -> None:
     await asyncio.sleep(random.randint(low, high) if high > low else high)
 
 
-async def send_single(pair: PairRecord, target_entity, msg: Any) -> None:
+async def _refetch_message(source_entity, msg_id: int):
+    fresh = await safe_get_messages(source_entity, ids=msg_id)
+    if isinstance(fresh, list):
+        return fresh[0] if fresh else None
+    return fresh
+
+
+async def _refetch_album(source_entity, album: list[Any]) -> list[Any]:
+    ids = [int(m.id) for m in album]
+    fresh = await safe_get_messages(source_entity, ids=ids)
+    if not fresh:
+        return []
+    if not isinstance(fresh, list):
+        fresh = [fresh]
+    by_id = {int(m.id): m for m in fresh if m}
+    return [by_id[i] for i in ids if i in by_id]
+
+
+async def send_single(pair: PairRecord, source_entity, target_entity, msg: Any) -> None:
     await human_delay()
+
     if getattr(msg, "media", None):
-        await safe_send_file(target_entity, msg.media, caption=build_single_text(pair, msg))
+        caption = build_single_text(pair, msg)
+        try:
+            await safe_send_file(target_entity, msg.media, caption=caption)
+        except FileReferenceExpiredError:
+            fresh = await _refetch_message(source_entity, int(msg.id))
+            if not fresh or not getattr(fresh, "media", None):
+                raise
+            await safe_send_file(
+                target_entity,
+                fresh.media,
+                caption=build_single_text(pair, fresh),
+            )
     else:
         text = build_single_text(pair, msg)
         if text:
             await safe_send_message(target_entity, text)
 
 
-async def send_album(pair: PairRecord, target_entity, album: list[Any], *, bypass_post_rule: bool = False) -> None:
+async def send_album(
+    pair: PairRecord,
+    source_entity,
+    target_entity,
+    album: list[Any],
+    *,
+    bypass_post_rule: bool = False,
+) -> None:
     await human_delay()
+
     files = [m.media for m in album if getattr(m, "media", None)]
     captions = build_album_captions(pair, album)
+
     if files:
-        await safe_send_album(target_entity, files, captions)
+        try:
+            await safe_send_album(target_entity, files, captions)
+        except FileReferenceExpiredError:
+            fresh_album = await _refetch_album(source_entity, album)
+            fresh_files = [m.media for m in fresh_album if getattr(m, "media", None)]
+            if not fresh_files:
+                raise
+            await safe_send_album(
+                target_entity,
+                fresh_files,
+                build_album_captions(pair, fresh_album),
+            )
     else:
         text = append_ads(maybe_clean_text(pair, collect_album_text(album)), pair.ads)
         if text:
@@ -207,9 +268,11 @@ async def collect_grouped_messages(source_entity, msg_or_id: Any) -> list[Any]:
     source_msg = next((m for m in around if int(m.id) == source_msg_id), None)
     if not source_msg:
         return []
+
     grouped_id = getattr(source_msg, "grouped_id", None)
     if not grouped_id:
         return [source_msg]
+
     items = [m for m in around if getattr(m, "grouped_id", None) == grouped_id]
     return sorted(items, key=lambda x: x.id)
         
