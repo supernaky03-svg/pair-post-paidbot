@@ -148,32 +148,49 @@ class PairService:
         await self.targets.detach_target_if_unused(old_target_key, old_target_entity)
         return pair
 
-    async def update_source(self,user_id: int,pair_no: int,source_input: str,scan_count: int | None,remove_url_rule: bool | None = None,) -> PairRecord:
-        pair = await self.pairs.get(user_id, pair_no)
-        if not pair or not pair.active:
-            raise ValidationError("Pair not found.")
-        old_source_key = pair.source_key
-        old_source_input = pair.source_input
-        resolved_source = await resolve_source(source_input)
-        await self.validate_source_reuse(user_id, resolved_source.source_key, ignore_pair_no=pair_no)
-        pair.source_input = source_input
-        pair.source_key = resolved_source.source_key
-        pair.source_kind = resolved_source.source_kind
-        pair.scan_count = scan_count
-        pair.last_processed_id = 0
-        pair.recent_sent_ids = []
-        
-        if remove_url_rule is not None:
-            pair.remove_url_rule = remove_url_rule
-            await self.pairs.save(pair)
-            await self.sources.attach_source(pair, resolved_source)
-            if old_source_key != pair.source_key:
-                try:
-                    old_entity = (await resolve_source(old_source_input)).entity
-                except Exception:
-                    old_entity = None
-                    await self.sources.detach_source_if_unused(old_source_key, old_entity)
-                    return pair
+    async def update_source(
+    self,
+    user_id: int,
+    pair_no: int,
+    source_input: str,
+    scan_count: int | None,
+    remove_url_rule: bool | None = None,
+) -> PairRecord:
+    pair = await self.pairs.get(user_id, pair_no)
+    if not pair or not pair.active:
+        raise ValidationError("Pair not found.")
+
+    old_source_key = pair.source_key
+    old_source_input = pair.source_input
+
+    resolved_source = await resolve_source(source_input)
+    await self.validate_source_reuse(
+        user_id,
+        resolved_source.source_key,
+        ignore_pair_no=pair_no,
+    )
+
+    pair.source_input = source_input
+    pair.source_key = resolved_source.source_key
+    pair.source_kind = resolved_source.source_kind
+    pair.scan_count = scan_count
+    pair.last_processed_id = 0
+    pair.recent_sent_ids = []
+
+    if remove_url_rule is not None:
+        pair.remove_url_rule = remove_url_rule
+
+    await self.pairs.save(pair)
+    await self.sources.attach_source(pair, resolved_source)
+
+    if old_source_key != pair.source_key:
+        try:
+            old_entity = (await resolve_source(old_source_input)).entity
+        except Exception:
+            old_entity = None
+        await self.sources.detach_source_if_unused(old_source_key, old_entity)
+
+    return pair
 
     async def update_target(self, user_id: int, pair_no: int, target_input: str) -> PairRecord:
         pair = await self.pairs.get(user_id, pair_no)
