@@ -119,6 +119,26 @@ def _pair_line(pair: PairRecord) -> str:
         f"remove_url_rule={'ON' if pair.remove_url_rule else 'OFF'}"
     )
 
+def _pair_status_block(pair: PairRecord) -> str:
+    base = _pair_line(pair)
+    parts = base.split("\n", 1)
+
+    first_line = parts[0]
+    rest = parts[1] if len(parts) > 1 else ""
+
+    source_target = first_line.split(" | ", 1)[1] if " | " in first_line else first_line
+
+    if rest:
+        return (
+            f"────────── Pair #{pair.pair_no} ──────────\n"
+            f"{source_target}\n"
+            f"{rest}"
+        )
+
+    return (
+        f"────────── Pair #{pair.pair_no} ──────────\n"
+        f"{source_target}"
+    )
 
 def _normalize_target_for_bot(target_input: str) -> str | int:
     value = (target_input or "").strip()
@@ -233,14 +253,9 @@ async def _status_text(user_id: int, language: str) -> str:
     if not pairs:
         lines.append(t(language, "status_no_pairs"))
     else:
-        sep = "/////////////////////////////////"
         for pair in pairs:
             lines.append("")
-            lines.append(sep)
-            lines.append("")
-            lines.append(_pair_line(pair))
-        lines.append("")
-        lines.append(sep)
+            lines.append(_pair_status_block(pair))
     return "\n".join(lines)
 
 
