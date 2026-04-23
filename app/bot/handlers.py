@@ -233,9 +233,14 @@ async def _status_text(user_id: int, language: str) -> str:
     if not pairs:
         lines.append(t(language, "status_no_pairs"))
     else:
+        sep = "/////////////////////////////////"
         for pair in pairs:
             lines.append("")
+            lines.append(sep)
+            lines.append("")
             lines.append(_pair_line(pair))
+        lines.append("")
+        lines.append(sep)
     return "\n".join(lines)
 
 
