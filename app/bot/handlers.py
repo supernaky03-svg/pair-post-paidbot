@@ -630,30 +630,31 @@ async def start_cmd(message: Message, state: FSMContext) -> None:
             reply_markup=hide_reply_keyboard(),
         )
         return
-
-    if user.status != "activated":
-        await _remove_main_menu(message)
-        await state.set_state(OtpStates.waiting_otp)
-        await state.update_data(
-            last_activity=_now_ts(),
-            current_prompt_key="otp_required",
-            current_prompt_fmt={},
-            current_markup_payload={"type": "language"},
-            history=[],
-        )
+        allowed, _ = await access_service.can_use_features(user)
+        
+        if not allowed:
+            await _remove_main_menu(message)
+            
+            await state.set_state(OtpStates.waiting_otp)
+            
+            await state.update_data(
+                last_activity=_now_ts(),
+                current_prompt_key="otp_required",
+                current_prompt_fmt={},
+                current_markup_payload={"type": "language"},
+                history=[],
+            )
+            await message.answer(
+                "Botကို အသုံးပြုရန် key ထည့်ပါ။\n"
+                "Keyမရှိပါက admin @mnsm6003 ကို ဆက်သွယ်ပါ",
+                reply_markup=language_keyboard(),
+            )
+            return
+            
         await message.answer(
-            t(language, "otp_required"),
-            reply_markup=language_keyboard(),
+            "အောက်က menu ထဲက တစ်ခုကိုရွေးပါ။",
+            reply_markup=main_menu(language),
         )
-        return
-
-    # Admin / activated users must get a fresh message with main_menu(...)
-    await message.answer(build_tutorial(language))
-    await message.answer(
-        t(language, "main_menu_ready"),
-        reply_markup=main_menu(language),
-    )
-
 
 @router.message(Command("otp"))
 async def admin_otp(message: Message) -> None:
