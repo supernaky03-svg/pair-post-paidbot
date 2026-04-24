@@ -6,7 +6,7 @@ import re
 from collections import defaultdict
 from typing import Any, Iterable
 
-from telethon.errors.rpcerrorlist import FileReferenceExpiredError
+from telethon.errors.rpcerrorlist import FileReferenceExpiredError,MediaCaptionTooLongError
 
 from app.core.config import settings
 from app.domain.models import PairRecord
@@ -20,6 +20,8 @@ from app.telegram.safe_ops import (
 # Remove common ad/share links from outgoing text while keeping the rest intact.
 LINK_RE = re.compile(r"(?i)\b(?:https?://|www\.|t\.me/|telegram\.me/)\S+")
 USERNAME_RE = re.compile(r"(?i)(?<!\w)@[A-Za-z0-9_]{4,}(?!\w)")
+MAX_MEDIA_CAPTION_LENGTH = 1024
+MAX_TEXT_MESSAGE_LENGTH = 4096
 
 
 def message_text(msg: Any) -> str:
@@ -208,26 +210,118 @@ async def _refetch_album(source_entity, album: list[Any]) -> list[Any]:
     return [by_id[i] for i in ids if i in by_id]
 
 
+def _chunk_text(text: str, limit: int = MAX_TEXT_MESSAGE_LENGTH) -> list[str]:
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    chunks: list[str] = []
+    while len(text) > limit:
+        cut = text.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = text.rfind(" ", 0, limit)
+        if cut <= 0:
+            cut = limit
+
+        chunk = text[:cut].strip()
+        if chunk:
+            chunks.append(chunk)
+        text = text[cut:].strip()
+
+    if text:
+        chunks.append(text)
+
+    return chunks
+
+
+async def _send_long_text(target_entity, text: str | None) -> None:
+    for chunk in _chunk_text(text or ""):
+        await safe_send_message(target_entity, chunk)
+
+
+def _split_media_caption(text: str | None) -> tuple[str | None, str | None]:
+    text = (text or "").strip()
+    if not text:
+        return None, None
+
+    if len(text) <= MAX_MEDIA_CAPTION_LENGTH:
+        return text, None
+
+    cut = text.rfind("\n", 0, MAX_MEDIA_CAPTION_LENGTH)
+    if cut <= 0:
+        cut = text.rfind(" ", 0, MAX_MEDIA_CAPTION_LENGTH)
+    if cut <= 0:
+        cut = MAX_MEDIA_CAPTION_LENGTH
+
+    caption = text[:cut].strip()
+    rest = text[cut:].strip()
+
+    return caption or None, rest or None
+
+
+async def _send_file_with_caption_fallback(target_entity, media, text: str | None) -> None:
+    caption, rest = _split_media_caption(text)
+
+    try:
+        await safe_send_file(target_entity, media, caption=caption)
+    except MediaCaptionTooLongError:
+        await safe_send_file(target_entity, media, caption=None)
+        rest = text
+
+    if rest:
+        await _send_long_text(target_entity, rest)
+
+
+def _prepare_album_captions(captions: list[str]) -> tuple[list[str], str | None]:
+    limited: list[str] = []
+    rest_parts: list[str] = []
+
+    for caption in captions:
+        limited_caption, rest = _split_media_caption(caption)
+        limited.append(limited_caption or "")
+        if rest:
+            rest_parts.append(rest)
+
+    rest_text = "\n\n".join(part for part in rest_parts if part.strip()).strip()
+    return limited, rest_text or None
+
+
+async def _send_album_with_caption_fallback(target_entity, files, captions: list[str]) -> None:
+    limited_captions, rest_text = _prepare_album_captions(captions)
+
+    try:
+        await safe_send_album(target_entity, files, limited_captions)
+    except MediaCaptionTooLongError:
+        await safe_send_album(target_entity, files, [""] * len(files))
+        rest_text = "\n\n".join(c for c in captions if c and c.strip()).strip()
+
+    if rest_text:
+        await _send_long_text(target_entity, rest_text)
+
+
 async def send_single(pair: PairRecord, source_entity, target_entity, msg: Any) -> None:
     await human_delay()
 
     if getattr(msg, "media", None):
         caption = build_single_text(pair, msg)
+
         try:
-            await safe_send_file(target_entity, msg.media, caption=caption)
+            await _send_file_with_caption_fallback(target_entity, msg.media, caption)
         except FileReferenceExpiredError:
             fresh = await _refetch_message(source_entity, int(msg.id))
             if not fresh or not getattr(fresh, "media", None):
                 raise
-            await safe_send_file(
+
+            await _send_file_with_caption_fallback(
                 target_entity,
                 fresh.media,
-                caption=build_single_text(pair, fresh),
+                build_single_text(pair, fresh),
             )
+
     else:
         text = build_single_text(pair, msg)
         if text:
-            await safe_send_message(target_entity, text)
+            await _send_long_text(target_entity, text)
 
 
 async def send_album(
@@ -245,21 +339,23 @@ async def send_album(
 
     if files:
         try:
-            await safe_send_album(target_entity, files, captions)
+            await _send_album_with_caption_fallback(target_entity, files, captions)
         except FileReferenceExpiredError:
             fresh_album = await _refetch_album(source_entity, album)
             fresh_files = [m.media for m in fresh_album if getattr(m, "media", None)]
             if not fresh_files:
                 raise
-            await safe_send_album(
+
+            await _send_album_with_caption_fallback(
                 target_entity,
                 fresh_files,
                 build_album_captions(pair, fresh_album),
             )
+
     else:
         text = append_ads(maybe_clean_text(pair, collect_album_text(album)), pair.ads)
         if text:
-            await safe_send_message(target_entity, text)
+            await _send_long_text(target_entity, text)
 
 
 async def collect_grouped_messages(source_entity, msg_or_id: Any) -> list[Any]:
