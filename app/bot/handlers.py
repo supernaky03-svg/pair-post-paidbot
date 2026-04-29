@@ -619,42 +619,46 @@ def _menu_action(text: str | None) -> str | None:
 
 @router.message(Command("start"))
 async def start_cmd(message: Message, state: FSMContext) -> None:
-    await state.clear()
-
     user = await access_service.ensure_user(message.from_user)
     language = _lang(user)
 
+    # Banned user
     if user.is_banned:
+        await state.clear()
         await message.answer(
-            t(language, "access_blocked"),
+            "သင့် account ကို bot အသုံးပြုခွင့် ပိတ်ထားပါသည်။",
             reply_markup=hide_reply_keyboard(),
         )
         return
-        allowed, _ = await access_service.can_use_features(user)
-        
-        if not allowed:
-            await _remove_main_menu(message)
-            
-            await state.set_state(OtpStates.waiting_otp)
-            
-            await state.update_data(
-                last_activity=_now_ts(),
-                current_prompt_key="otp_required",
-                current_prompt_fmt={},
-                current_markup_payload={"type": "language"},
-                history=[],
-            )
-            await message.answer(
-                "Botကို အသုံးပြုရန် key ထည့်ပါ။\n"
-                "Keyမရှိပါက admin @mnsm6003 ကို ဆက်သွယ်ပါ",
-                reply_markup=language_keyboard(),
-            )
-            return
-            
-        await message.answer(
-            "အောက်က menu ထဲက တစ်ခုကိုရွေးပါ။",
-            reply_markup=main_menu(language),
+
+    allowed, _ = await access_service.can_use_features(user)
+
+    # Unverified / expired user
+    if not allowed:
+        await _remove_main_menu(message)
+
+        await state.set_state(OtpStates.waiting_otp)
+        await state.update_data(
+            last_activity=_now_ts(),
+            current_prompt_key="otp_required",
+            current_prompt_fmt={},
+            current_markup_payload={"type": "language"},
+            history=[],
         )
+
+        await message.answer(
+            "Botကို အသုံးပြုရန် key ထည့်ပါ။\n"
+            "Keyမရှိပါက admin @mnsm6003 ကို ဆက်သွယ်ပါ",
+            reply_markup=language_keyboard(),
+        )
+        return
+
+    # Verified user / admin
+    await state.clear()
+    await message.answer(
+        "အောက်က menu ထဲက တစ်ခုကိုရွေးပါ။",
+        reply_markup=main_menu(language),
+    )
 
 @router.message(Command("otp"))
 async def admin_otp(message: Message) -> None:
