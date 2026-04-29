@@ -7,6 +7,7 @@ from app.db.repositories import PairRepo, SettingsRepo, UserRepo
 from app.domain.models import PairRecord
 from app.services.source_registry import SourceRegistryService
 from app.services.target_registry import TargetRegistryService
+from app.services.repost_logic import runtime_cache
 from app.telegram.entity import (
     describe_target,
     resolve_and_join_target,
@@ -134,6 +135,7 @@ class PairService:
         if not pair or not pair.active:
             raise ValidationError("Pair not found.")
         await self.pairs.deactivate(user_id, pair_no)
+        runtime_cache.clear_pair(user_id, pair_no)
         try:
             old_source_entity = (await resolve_source(pair.source_input)).entity
         except Exception:
@@ -182,6 +184,7 @@ class PairService:
 
         await self.pairs.save(pair)
         await self.sources.attach_source(pair, resolved_source)
+        runtime_cache.clear_pair(user_id, pair_no)
 
         if old_source_key != pair.source_key:
             try:
@@ -205,6 +208,7 @@ class PairService:
         pair.target_title = resolved_target.title
         await self.pairs.save(pair)
         await self.targets.attach_target(pair, resolved_target)
+        runtime_cache.clear_pair(user_id, pair_no)
         if old_target_key != pair.target_key:
             try:
                 old_entity = await resolve_target(old_target_input)
