@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.db.repositories import PairRepo, TargetRepo
+from app.db.repositories import PairRepo, TargetRepo, SourceRepo
 from app.domain.models import PairRecord, TargetRecord
 from app.telegram.entity import (
     describe_target,
@@ -16,6 +16,7 @@ from app.telegram.shared_client import client as shared_client
 class TargetRegistryService:
     def __init__(self) -> None:
         self.targets = TargetRepo()
+        self.sources = SourceRepo()
         self.pairs = PairRepo()
 
     def _pair_target_key(self, pair: PairRecord) -> str | None:
@@ -25,7 +26,27 @@ class TargetRegistryService:
             return describe_target(pair.target_input).target_key
         except Exception:
             return None
-
+			
+	async def _target_is_used_as_source(self, target: TargetRecord) -> bool:
+		sources = await self.sources.list_all()
+		
+		for source in sources:
+			if source.active_pair_reference_count <= 0:
+				continue
+				
+			if (
+				target.chat_id is not None
+				and source.chat_id is not None
+				and int(source.chat_id) == int(target.chat_id)
+			):
+				return True
+			if (
+				source.source_kind == target.target_kind
+				and source.normalized_value == target.normalized_value
+			):
+				return True
+		return False
+    
     async def attach_target(self, pair: PairRecord, resolved) -> TargetRecord:
         all_active = await self.pairs.list_all_active()
         in_use = sum(1 for item in all_active if self._pair_target_key(item) == resolved.target_key)
@@ -67,12 +88,18 @@ class TargetRegistryService:
         target.active_pair_reference_count = in_use
         target.last_verified_at = datetime.now(timezone.utc)
         await self.targets.save(target)
-        if in_use == 0 and target.joined_by_shared_session and entity is not None:
-            await leave_target(entity)
-            target.joined_by_shared_session = False
-            await self.targets.save(target)
-            return True
-        return False
+        used_as_source = await self._target_is_used_as_source(target)
+		if (
+			in_use == 0
+			and not used_as_source
+			and target.joined_by_shared_session
+			and entity is not None
+		):
+			await leave_target(entity)
+			target.joined_by_shared_session = False
+			await self.targets.save(target)
+			return True
+		return False
 
     async def cleanup_temporary_target(self, target_input: str, committed_keys: set[str] | None = None) -> None:
         committed_keys = committed_keys or set()
