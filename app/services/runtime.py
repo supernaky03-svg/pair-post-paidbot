@@ -19,7 +19,7 @@ from app.services.repost_logic import (
     should_process_single,
 )
 from app.services.target_admin_notifier import TargetAdminNotifier
-from app.telegram.entity import resolve_source, resolve_target
+from app.telegram.entity import resolve_and_join_target, resolve_source
 from app.telegram.safe_ops import safe_get_messages
 from app.telegram.shared_client import client
 
@@ -95,10 +95,13 @@ class RuntimeManager:
 
     async def _ensure_entities(self, pair: PairRecord):
         cache = runtime_cache.get_pair_entities(pair.user_id, pair.pair_no)
+        
         if cache["source"] is None:
             cache["source"] = (await resolve_source(pair.source_input)).entity
+            
         if cache["target"] is None:
-            cache["target"] = await resolve_target(pair.target_input)
+            cache["target"] = (await resolve_and_join_target(pair.target_input)).entity
+            
         return cache["source"], cache["target"]
 
     async def _collect_messages(self, pair: PairRecord, source_entity):
