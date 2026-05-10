@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.core.config import settings
+from app.core.constants import ADS_MODES
 from app.db.connection import execute, fetch_all, fetch_one
 from app.domain.models import PairRecord, SourceRecord, TargetRecord, UserRecord
 
@@ -33,17 +34,27 @@ def parse_duration(code: str) -> timedelta:
     raise ValueError("unsupported duration")
 
 
+def _json_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        value = json.loads(value)
+    if isinstance(value, list):
+        return value
+    return []
+
+
 class UserRepo:
     async def upsert_basic(self, user_id: int, username: str | None, full_name: str | None) -> None:
         await execute(
-            '''
+            """
             INSERT INTO users (user_id, username, full_name)
             VALUES (%s, %s, %s)
             ON CONFLICT (user_id) DO UPDATE SET
                 username = EXCLUDED.username,
                 full_name = EXCLUDED.full_name,
                 updated_at = NOW()
-            ''',
+            """,
             (user_id, username, full_name),
         )
 
@@ -107,10 +118,7 @@ class UserRepo:
         await execute(
             """
             UPDATE users
-            SET status = 'activated',
-                activated_until = %s,
-                needs_restore_choice = %s,
-                updated_at = NOW()
+            SET status = 'activated', activated_until = %s, needs_restore_choice = %s, updated_at = NOW()
             WHERE user_id = %s
             """,
             (until, needs_restore_choice, user_id),
@@ -129,9 +137,7 @@ class UserRepo:
         return [self._row_to_user(r) for r in rows]
 
     async def list_expired(self) -> list[UserRecord]:
-        rows = await fetch_all(
-            "SELECT * FROM users WHERE status = 'expired' ORDER BY user_id"
-        )
+        rows = await fetch_all("SELECT * FROM users WHERE status = 'expired' ORDER BY user_id")
         return [self._row_to_user(r) for r in rows]
 
     async def set_pair_limit(self, user_id: int, value: int | None) -> None:
@@ -155,13 +161,13 @@ class OtpRepo:
     async def create(self, duration_code: str, raw_key: str, admin_id: int) -> None:
         parse_duration(duration_code)
         await execute(
-            '''
+            """
             INSERT INTO otp_keys (key_hash, duration_code, created_by_admin)
             VALUES (%s, %s, %s)
             ON CONFLICT (key_hash) DO UPDATE SET
                 duration_code = EXCLUDED.duration_code,
                 created_by_admin = EXCLUDED.created_by_admin
-            ''',
+            """,
             (hash_otp(raw_key), duration_code, admin_id),
         )
 
@@ -177,14 +183,11 @@ class OtpRepo:
         duration = parse_duration(row["duration_code"])
         activated_until = _utcnow() + duration
         await execute(
-            '''
+            """
             UPDATE otp_keys
-            SET is_used = TRUE,
-                redeemed_by_user_id = %s,
-                redeemed_at = NOW(),
-                activated_until = %s
+            SET is_used = TRUE, redeemed_by_user_id = %s, redeemed_at = NOW(), activated_until = %s
             WHERE key_hash = %s
-            ''',
+            """,
             (user_id, activated_until, hash_otp(raw_key)),
         )
         return activated_until
@@ -192,15 +195,14 @@ class OtpRepo:
 
 class PairRepo:
     def _row_to_pair(self, row: dict[str, Any]) -> PairRecord:
-        recent = row.get("recent_sent_ids") or []
-        if isinstance(recent, str):
-            recent = json.loads(recent)
-        keywords = row.get("keyword_values") or []
-        if isinstance(keywords, str):
-            keywords = json.loads(keywords)
-        ads = row.get("ads") or []
-        if isinstance(ads, str):
-            ads = json.loads(ads)
+        recent = _json_list(row.get("recent_sent_ids"))
+        keywords = _json_list(row.get("keyword_values"))
+        ads = _json_list(row.get("ads"))
+        remove_text_values = _json_list(row.get("remove_text_values"))
+        ads_mode = row.get("ads_mode") or "all"
+        if ads_mode not in ADS_MODES:
+            ads_mode = "all"
+
         return PairRecord(
             user_id=row["user_id"],
             pair_no=row["pair_no"],
@@ -213,13 +215,16 @@ class PairRepo:
             target_title=row.get("target_title"),
             scan_count=row.get("scan_count"),
             last_processed_id=row.get("last_processed_id") or 0,
-            recent_sent_ids=list(recent),
+            recent_sent_ids=[int(x) for x in recent if str(x).lstrip("-").isdigit()],
             forward_rule=bool(row.get("forward_rule")),
             remove_url_rule=bool(row.get("remove_url_rule", True)),
             post_rule=bool(row.get("post_rule")),
             keyword_mode=row.get("keyword_mode") or "off",
-            keyword_values=list(keywords),
-            ads=list(ads),
+            keyword_values=[str(x) for x in keywords if str(x).strip()],
+            ads=[str(x) for x in ads if str(x).strip()],
+            ads_mode=ads_mode,
+            video_post_remove=bool(row.get("video_post_remove", False)),
+            remove_text_values=[str(x) for x in remove_text_values if str(x).strip()],
             active=bool(row.get("active", True)),
             generation=row.get("generation") or 1,
         )
@@ -244,14 +249,27 @@ class PairRepo:
         return self._row_to_pair(row) if row else None
 
     async def save(self, pair: PairRecord) -> None:
+        ads_mode = pair.ads_mode if pair.ads_mode in ADS_MODES else "all"
         await execute(
-            '''
+            """
             INSERT INTO pairs (
-                user_id, pair_no, source_input, source_key, source_kind, target_input, target_key,
-                target_chat_id, target_title, scan_count, last_processed_id, recent_sent_ids,
-                forward_rule, remove_url_rule, post_rule, keyword_mode, keyword_values, ads, active, generation, updated_at
+                user_id, pair_no, source_input, source_key, source_kind,
+                target_input, target_key, target_chat_id, target_title,
+                scan_count, last_processed_id, recent_sent_ids,
+                forward_rule, remove_url_rule, post_rule,
+                keyword_mode, keyword_values, ads, ads_mode,
+                video_post_remove, remove_text_values,
+                active, generation, updated_at
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s, %s, NOW())
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s::jsonb,
+                %s, %s, %s,
+                %s, %s::jsonb, %s::jsonb, %s,
+                %s, %s::jsonb,
+                %s, %s, NOW()
+            )
             ON CONFLICT (user_id, pair_no) DO UPDATE SET
                 source_input = EXCLUDED.source_input,
                 source_key = EXCLUDED.source_key,
@@ -269,10 +287,13 @@ class PairRepo:
                 keyword_mode = EXCLUDED.keyword_mode,
                 keyword_values = EXCLUDED.keyword_values,
                 ads = EXCLUDED.ads,
+                ads_mode = EXCLUDED.ads_mode,
+                video_post_remove = EXCLUDED.video_post_remove,
+                remove_text_values = EXCLUDED.remove_text_values,
                 active = EXCLUDED.active,
                 generation = EXCLUDED.generation,
                 updated_at = NOW()
-            ''',
+            """,
             (
                 pair.user_id,
                 pair.pair_no,
@@ -292,6 +313,9 @@ class PairRepo:
                 pair.keyword_mode,
                 json.dumps(pair.keyword_values),
                 json.dumps(pair.ads),
+                ads_mode,
+                pair.video_post_remove,
+                json.dumps(pair.remove_text_values),
                 pair.active,
                 pair.generation,
             ),
@@ -342,11 +366,11 @@ class SourceRepo:
 
     async def save(self, source: SourceRecord) -> None:
         await execute(
-            '''
+            """
             INSERT INTO sources (
                 source_key, source_input, source_kind, normalized_value, invite_hash,
-                joined_by_shared_session, active_pair_reference_count, chat_id, title,
-                last_verified_at, last_error, updated_at
+                joined_by_shared_session, active_pair_reference_count,
+                chat_id, title, last_verified_at, last_error, updated_at
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (source_key) DO UPDATE SET
@@ -361,7 +385,7 @@ class SourceRepo:
                 last_verified_at = EXCLUDED.last_verified_at,
                 last_error = EXCLUDED.last_error,
                 updated_at = NOW()
-            ''',
+            """,
             (
                 source.source_key,
                 source.source_input,
@@ -408,8 +432,8 @@ class TargetRepo:
             """
             INSERT INTO targets (
                 target_key, target_input, target_kind, normalized_value, invite_hash,
-                joined_by_shared_session, active_pair_reference_count, chat_id, title,
-                last_verified_at, last_error, last_session_fingerprint, updated_at
+                joined_by_shared_session, active_pair_reference_count,
+                chat_id, title, last_verified_at, last_error, last_session_fingerprint, updated_at
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
             ON CONFLICT (target_key) DO UPDATE SET
@@ -450,11 +474,12 @@ class SettingsRepo:
 
     async def set_json(self, key: str, value: dict[str, Any]) -> None:
         await execute(
-            '''
+            """
             INSERT INTO global_settings (key, value_json, updated_at)
             VALUES (%s, %s::jsonb, NOW())
-            ON CONFLICT (key) DO UPDATE SET value_json = EXCLUDED.value_json, updated_at = NOW()
-            ''',
+            ON CONFLICT (key) DO UPDATE SET
+                value_json = EXCLUDED.value_json,
+                updated_at = NOW()
+            """,
             (key, json.dumps(value)),
         )
-        
