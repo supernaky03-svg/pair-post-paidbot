@@ -19,27 +19,27 @@ def main_menu(language: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(text=t(language, "menu_help")),
                 KeyboardButton(text=t(language, "menu_add_pair")),
                 KeyboardButton(text=t(language, "menu_delete_pair")),
+                KeyboardButton(text=t(language, "menu_edit_source")),
             ],
             [
-                KeyboardButton(text=t(language, "menu_edit_source")),
+                
                 KeyboardButton(text=t(language, "menu_edit_target")),
                 KeyboardButton(text=t(language, "menu_keyword")),
-            ],
-            [
                 KeyboardButton(text=t(language, "menu_ads")),
                 KeyboardButton(text=t(language, "menu_status")),
-                KeyboardButton(text=t(language, "menu_check")),
             ],
             [
                 KeyboardButton(text=t(language, "menu_forward_rule")),
                 KeyboardButton(text=t(language, "menu_post_rule")),
                 KeyboardButton(text=t(language, "menu_remove_url_rule")),
+                KeyboardButton(text=t(language, "menu_check")),
+            ],
+            [
+                
             ],
             [
                 KeyboardButton(text=t(language, "menu_video_post_remove")),
                 KeyboardButton(text=t(language, "menu_remove_text")),
-            ],
-            [
                 KeyboardButton(text=t(language, "menu_contact")),
                 KeyboardButton(text=t(language, "menu_language")),
             ],
