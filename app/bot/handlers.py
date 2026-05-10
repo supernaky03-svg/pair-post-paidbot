@@ -689,9 +689,9 @@ def _menu_action(text: str | None) -> str | None:
         "check": {"check", "စစ်မယ်"},
         "forward_rule": {"forward rule"},
         "post_rule": {"post rule"},
-        "remove_url_rule": {"remove url rule", "remove url", "url rule"},
-        "video_post_remove": {"video post remove", "video remove", "video caption remove"},
-        "remove_text": {"remove text", "text remove"},
+        "remove_url_rule": {"remove url rule", "remove url", "url rule","URL ဖျက် Rule"},
+        "video_post_remove": {"video post remove", "video remove", "video caption remove","Video Caption ဖျက်"},
+        "remove_text": {"remove text", "text remove","စာသားဖျက်"},
         "contact": {"contact", "ဆက်သွယ်ရန်"},
         "language": {"language", "ဘာသာစကား"},
     }
