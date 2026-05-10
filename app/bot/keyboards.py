@@ -36,6 +36,10 @@ def main_menu(language: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(text=t(language, "menu_remove_url_rule")),
             ],
             [
+                KeyboardButton(text=t(language, "menu_video_post_remove")),
+                KeyboardButton(text=t(language, "menu_remove_text")),
+            ],
+            [
                 KeyboardButton(text=t(language, "menu_contact")),
                 KeyboardButton(text=t(language, "menu_language")),
             ],
@@ -71,11 +75,9 @@ def confirm_keyboard(prefix: str, language: str, include_back: bool = True) -> I
         InlineKeyboardButton(text=t(language, "confirm"), callback_data=f"{prefix}:yes"),
         InlineKeyboardButton(text=t(language, "menu_cancel"), callback_data=f"{prefix}:cancel"),
     ]
-
     rows = [row]
     if include_back:
         rows.append([InlineKeyboardButton(text=t(language, "menu_back"), callback_data=f"{prefix}:back")])
-
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -94,9 +96,35 @@ def rule_keyboard(prefix: str, language: str) -> InlineKeyboardMarkup:
     )
 
 
+def ads_mode_keyboard(prefix: str, language: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=t(language, "ads_mode_all"), callback_data=f"{prefix}:all")],
+            [InlineKeyboardButton(text=t(language, "ads_mode_video_only"), callback_data=f"{prefix}:video_only")],
+            [InlineKeyboardButton(text=t(language, "ads_mode_non_video_only"), callback_data=f"{prefix}:non_video_only")],
+            [
+                InlineKeyboardButton(text=t(language, "menu_back"), callback_data=f"{prefix}:back"),
+                InlineKeyboardButton(text=t(language, "menu_cancel"), callback_data=f"{prefix}:cancel"),
+            ],
+        ]
+    )
+
+
 def text_step_keyboard(prefix: str, language: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
+            [
+                InlineKeyboardButton(text=t(language, "menu_back"), callback_data=f"{prefix}:back"),
+                InlineKeyboardButton(text=t(language, "menu_cancel"), callback_data=f"{prefix}:cancel"),
+            ],
+        ]
+    )
+
+
+def skip_text_step_keyboard(prefix: str, language: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=t(language, "menu_skip"), callback_data=f"{prefix}:skip")],
             [
                 InlineKeyboardButton(text=t(language, "menu_back"), callback_data=f"{prefix}:back"),
                 InlineKeyboardButton(text=t(language, "menu_cancel"), callback_data=f"{prefix}:cancel"),
@@ -133,24 +161,26 @@ def ads_action_keyboard(language: str) -> InlineKeyboardMarkup:
     )
 
 
-def pair_picker(prefix: str, pairs: list[PairRecord], language: str, *, include_all: bool = False) -> InlineKeyboardMarkup:
+def pair_picker(
+    prefix: str,
+    pairs: list[PairRecord],
+    language: str,
+    *,
+    include_all: bool = False,
+) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text=f"#{pair.pair_no}", callback_data=f"{prefix}:{pair.pair_no}")]
         for pair in pairs
     ]
-
     if include_all:
         rows.append([InlineKeyboardButton(text=t(language, "all_pairs"), callback_data=f"{prefix}:all")])
-
     rows.append(
         [
             InlineKeyboardButton(text=t(language, "menu_back"), callback_data=f"{prefix}:back"),
             InlineKeyboardButton(text=t(language, "menu_cancel"), callback_data=f"{prefix}:cancel"),
         ]
     )
-
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
 
 
 def target_admin_keyboard(prefix: str, language: str) -> InlineKeyboardMarkup:

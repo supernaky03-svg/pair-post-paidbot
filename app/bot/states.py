@@ -12,9 +12,12 @@ class AddPairStates(StatesGroup):
     waiting_scan = State()
     waiting_target = State()
     waiting_ads = State()
+    waiting_ads_mode = State()
     waiting_post_rule = State()
     waiting_forward_rule = State()
     waiting_remove_url_rule = State()
+    waiting_video_post_remove = State()
+    waiting_remove_text = State()
     waiting_confirm = State()
 
 
@@ -49,6 +52,7 @@ class AdsStates(StatesGroup):
     waiting_pair_for_add = State()
     waiting_pair_for_delete = State()
     waiting_values = State()
+    waiting_mode = State()
     waiting_delete_confirm = State()
 
 
@@ -57,6 +61,10 @@ class RuleStates(StatesGroup):
     waiting_value = State()
 
 
+class RemoveTextStates(StatesGroup):
+    waiting_pair = State()
+    waiting_values = State()
+
+
 class CheckStates(StatesGroup):
     waiting_pair = State()
-    
