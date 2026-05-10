@@ -1190,10 +1190,13 @@ if data.startswith("add_remove_text:") and current_state == AddPairStates.waitin
                     source_input=info["source_input"],
                     scan_count=info["scan_count"],
                     target_input=info["target_input"],
-                    ads=info["ads"],
+                    ads=info.get("ads", []),
+                    ads_mode=info.get("ads_mode", "all"),
                     post_rule=info["post_rule"],
                     forward_rule=info["forward_rule"],
-                    remove_url_rule=info["remove_url_rule"]
+                    remove_url_rule=info.get("remove_url_rule", False),
+                    video_post_remove=info.get("video_post_remove", False),
+                    remove_text_values=info.get("remove_text_values", []),
                 )
             except Exception as exc:
                 await _show_step(call, state, f"Create failed: {exc}", reply_markup=None)
@@ -1754,11 +1757,39 @@ async def message_router(message: Message, state: FSMContext) -> None:
 
     if current_state == AddPairStates.waiting_ads.state:
         await _cleanup_user_message(message)
-        await state.update_data(ads=pair_service.normalize_ads(message.text))
-        await _set_step(state, AddPairStates.waiting_post_rule, prompt_key="rule_post_explain", markup_payload={"type": "add_post_rule"})
-        await _show_step(message, state, t(language, "rule_post_explain"), reply_markup=rule_keyboard("add_post", language))
-        return
+        ads = pair_service.normalize_ads(message.text or "skip")
+        await state.update_data(ads=ads)
 
+        if ads:
+            await _set_step(
+                state,
+                AddPairStates.waiting_ads_mode,
+                prompt_key="ads_mode_prompt",
+                markup_payload={"type": "add_ads_mode"},
+            )
+            await _show_step(
+                message,
+                state,
+                t(language, "ads_mode_prompt"),
+                reply_markup=ads_mode_keyboard("add_ads_mode", language),
+            )
+            return
+
+        await state.update_data(ads_mode="all")
+        await _set_step(
+            state,
+            AddPairStates.waiting_post_rule,
+            prompt_key="rule_post_explain",
+            markup_payload={"type": "add_post_rule"},
+        )
+        await _show_step(
+            message,
+            state,
+            t(language, "rule_post_explain"),
+            reply_markup=rule_keyboard("add_post", language),
+        )
+        return
+    
     if current_state == DeletePairStates.waiting_pair_no.state:
         await _cleanup_user_message(message)
         try:
