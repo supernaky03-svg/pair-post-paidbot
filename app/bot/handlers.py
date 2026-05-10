@@ -209,7 +209,7 @@ async def _enter_add_pair_target_admin_gate(
         target,
         state,
         warning_text,
-        reply_markup=target_admin_keyboard("add_target_admin_keyboard("add_target_admin", language),
+        reply_markup=target_admin_keyboard("add_target_admin", language),
     )
 
 def _normalize_target_for_bot(target_input: str) -> str | int:
