@@ -10,7 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.bot.keyboards import (
-    ads_action_keyboard,
+    ads_action_keyboard,ads_mode_keyboard,
     confirm_keyboard,
     hide_reply_keyboard,
     keyword_action_keyboard,
@@ -18,7 +18,7 @@ from app.bot.keyboards import (
     main_menu,
     pair_picker,
     restore_keyboard,
-    rule_keyboard,
+    rule_keyboard,skip_text_step_keyboard,
     target_admin_keyboard,
     text_step_keyboard,
 )
@@ -30,7 +30,7 @@ from app.bot.states import (
     EditSourceStates,
     EditTargetStates,
     KeywordStates,
-    OtpStates,
+    OtpStates,RemoveTextStates,
     RuleStates,
 )
 from app.core.config import settings
@@ -65,9 +65,12 @@ STATE_BY_NAME = {
         AddPairStates.waiting_scan,
         AddPairStates.waiting_target,
         AddPairStates.waiting_ads,
+        AddPairStates.waiting_ads_mode,
         AddPairStates.waiting_post_rule,
         AddPairStates.waiting_forward_rule,
         AddPairStates.waiting_remove_url_rule,
+        AddPairStates.waiting_video_post_remove,
+        AddPairStates.waiting_remove_text,
         AddPairStates.waiting_confirm,
         DeletePairStates.waiting_pair_no,
         DeletePairStates.waiting_confirm,
@@ -87,7 +90,10 @@ STATE_BY_NAME = {
         AdsStates.waiting_pair_for_add,
         AdsStates.waiting_pair_for_delete,
         AdsStates.waiting_values,
+        AdsStates.waiting_mode,
         AdsStates.waiting_delete_confirm,
+        RemoveTextStates.waiting_pair,
+        RemoveTextStates.waiting_values,
         RuleStates.waiting_pair,
         RuleStates.waiting_value,
         CheckStates.waiting_pair,
@@ -107,16 +113,33 @@ def _now_ts() -> float:
     return time.time()
 
 
+def _ads_mode_label(mode: str | None) -> str:
+    mode = mode or "all"
+    return {
+        "all": "All post",
+        "video_only": "Video only",
+        "non_video_only": "Non-video only",
+    }.get(mode, mode)
+
+
+def _remove_text_label(values: list[str] | None) -> str:
+    return ", ".join(values or []) or "-"
+
+
 def _pair_line(pair: PairRecord) -> str:
     keyword_values = ", ".join(pair.keyword_values) if pair.keyword_values else "-"
     ads_values = ", ".join(pair.ads) if pair.ads else "-"
     scan = "all" if pair.scan_count is None else str(pair.scan_count)
     return (
         f"#{pair.pair_no} | {pair.source_input} -> {pair.target_input}\n"
-        f"scan={scan} | keywords={pair.keyword_mode}:{keyword_values} | ads={ads_values}"
+        f"scan={scan} | keywords={pair.keyword_mode}:{keyword_values} | "
+        f"ads={ads_values} | "
+        f"ads_mode={_ads_mode_label(getattr(pair, 'ads_mode', 'all'))} | "
         f"post_rule={'ON' if pair.post_rule else 'OFF'} | "
         f"forward_rule={'ON' if pair.forward_rule else 'OFF'} | "
-        f"remove_url_rule={'ON' if pair.remove_url_rule else 'OFF'}"
+        f"remove_url_rule={'ON' if pair.remove_url_rule else 'OFF'} | "
+        f"video_post_remove={'ON' if getattr(pair, 'video_post_remove', False) else 'OFF'} | "
+        f"remove_text={_remove_text_label(getattr(pair, 'remove_text_values', []))}"
     )
 
 def _pair_status_block(pair: PairRecord) -> str:
@@ -138,6 +161,55 @@ def _pair_status_block(pair: PairRecord) -> str:
     return (
         f"────────── Pair #{pair.pair_no} ──────────\n"
         f"{source_target}"
+    )
+
+def _build_add_pair_summary(language: str, info: dict[str, Any]) -> str:
+    scan = "all" if info["scan_count"] is None else str(info["scan_count"])
+    return (
+        f"{t(language, 'pair_summary_title')}\n"
+        f"#{info['pair_no']}\n"
+        f"{t(language, 'summary_source')}: {info['source_input']}\n"
+        f"{t(language, 'summary_scan')}: {scan}\n"
+        f"{t(language, 'summary_target')}: {info['target_input']}\n"
+        f"{t(language, 'summary_ads')}: {', '.join(info.get('ads', [])) or '-'}\n"
+        f"{t(language, 'summary_ads_mode')}: {_ads_mode_label(info.get('ads_mode'))}\n"
+        f"{t(language, 'summary_post_rule')}: {'ON' if info.get('post_rule') else 'OFF'}\n"
+        f"{t(language, 'summary_forward_rule')}: {'ON' if info.get('forward_rule') else 'OFF'}\n"
+        f"{t(language, 'summary_remove_url_rule')}: {'ON' if info.get('remove_url_rule') else 'OFF'}\n"
+        f"{t(language, 'summary_video_post_remove')}: {'ON' if info.get('video_post_remove') else 'OFF'}\n"
+        f"{t(language, 'summary_remove_text')}: {_remove_text_label(info.get('remove_text_values'))}"
+    )
+
+
+async def _enter_add_pair_target_admin_gate(
+    target: Message | CallbackQuery,
+    state: FSMContext,
+    language: str,
+) -> None:
+    info = await state.get_data()
+    summary = _build_add_pair_summary(language, info)
+    warning_text = await _target_admin_warning_text(language, info["target_input"])
+    gate_payload = {
+        "type": "target_admin_gate",
+        "prefix": "add_target_admin",
+        "target_input": info["target_input"],
+        "failed": False,
+    }
+
+    await _set_step(
+        state,
+        AddPairStates.waiting_confirm,
+        prompt_key="target_prompt",
+        markup_payload=gate_payload,
+        panel_text=warning_text,
+    )
+    await state.update_data(summary_text=summary)
+
+    await _show_step(
+        target,
+        state,
+        warning_text,
+        reply_markup=target_admin_keyboard("add_target_admin_keyboard("add_target_admin", language),
     )
 
 def _normalize_target_for_bot(target_input: str) -> str | int:
@@ -406,6 +478,16 @@ async def _render_markup(user_id: int, language: str, payload: dict[str, Any] | 
         return rule_keyboard("add_forward", language)
     if kind == "add_remove_url_rule":
         return rule_keyboard("add_remove_url", language)
+    if kind == "add_video_post_remove_rule":
+        return rule_keyboard("add_video_post_remove", language)
+    if kind == "add_remove_text_step":
+        return skip_text_step_keyboard("add_remove_text", language)
+    if kind == "add_ads_mode":
+        return ads_mode_keyboard("add_ads_mode", language)
+    if kind == "ads_mode":
+        return ads_mode_keyboard(payload.get("prefix", "ads_mode"), language)
+    if kind == "remove_text_step":
+        return skip_text_step_keyboard(payload.get("prefix", "remove_text"), language)
     if kind == "edit_source_remove_url_rule":
         return rule_keyboard("edit_source_remove_url", language)
     if kind == "target_admin_gate":
@@ -607,9 +689,11 @@ def _menu_action(text: str | None) -> str | None:
         "check": {"check", "စစ်မယ်"},
         "forward_rule": {"forward rule"},
         "post_rule": {"post rule"},
+        "remove_url_rule": {"remove url rule", "remove url", "url rule"},
+        "video_post_remove": {"video post remove", "video remove", "video caption remove"},
+        "remove_text": {"remove text", "text remove"},
         "contact": {"contact", "ဆက်သွယ်ရန်"},
         "language": {"language", "ဘာသာစကား"},
-        "remove_url_rule": {"remove url rule", "remove url", "url rule"},
     }
     for action, values in candidates.items():
         if normalized in {value.lower() for value in values}:
@@ -832,6 +916,31 @@ async def admin_joined_sources(message: Message) -> None:
         return
     await message.answer("\n".join(f"{item.source_input} | refs={item.active_pair_reference_count}" for item in items))
 
+@router.message(AddPairStates.waiting_remove_text)
+async def add_pair_remove_text(message: Message, state: FSMContext) -> None:
+    user = await _ensure_access_message(message, state)
+    if not user:
+        return
+
+    language = _lang(user)
+    values = pair_service.normalize_remove_text(message.text or "skip")
+    await state.update_data(remove_text_values=values)
+    await _enter_add_pair_target_admin_gate(message, state, language)
+
+@router.message(RemoveTextStates.waiting_values)
+async def remove_text_values(message: Message, state: FSMContext) -> None:
+    user = await _ensure_access_message(message, state)
+    if not user:
+        return
+
+    language = _lang(user)
+    data = await state.get_data()
+    pair_no = int(data["pair_no"])
+    values = pair_service.normalize_remove_text(message.text or "skip")
+    await pair_service.update_remove_text(message.from_user.id, pair_no, values)
+    runtime_manager.clear_cache()
+    await _finish_with_main_menu(message, state, language, t(language, "remove_text_saved"))
+
 @router.callback_query()
 async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
     user = await access_service.ensure_user(call.from_user)
@@ -907,9 +1016,54 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
         await _go_back(call, state, language, call.from_user.id)
         return
 
+    if data.startswith("add_ads_mode:") and current_state == AddPairStates.waiting_ads_mode.state:
+        mode = data.split(":", 1)[1]
+        await state.update_data(ads_mode=pair_service.normalize_ads_mode(mode))
+        await _set_step(
+            state,
+            AddPairStates.waiting_post_rule,
+            prompt_key="rule_post_explain",
+            markup_payload={"type": "add_post_rule"},
+        )
+        await _show_step(
+            call,
+            state,
+            t(language, "rule_post_explain"),
+            reply_markup=rule_keyboard("add_post", language),
+        )
+        return
+    
     if data.endswith(":cancel") or data in {"kw_action:cancel", "ads_action:cancel"}:
         await _cancel_flow(call, state, language, call.from_user.id)
         return
+
+    if data.startswith("remove_text_pair:") and current_state == RemoveTextStates.waiting_pair.state:
+        value = data.split(":", 1)[1]
+        pair_no = int(value)
+        await state.update_data(pair_no=pair_no)
+        await _set_step(
+            state,
+            RemoveTextStates.waiting_values,
+            prompt_key="remove_text_prompt",
+            markup_payload={"type": "remove_text_step", "prefix": "remove_text"},
+        )
+        await _show_step(
+            call,
+            state,
+            t(language, "remove_text_prompt"),
+            reply_markup=skip_text_step_keyboard("remove_text", language),
+        )
+        return
+
+    if data.startswith("remove_text:") and current_state == RemoveTextStates.waiting_values.state:
+        action = data.split(":", 1)[1]
+        if action == "skip":
+            info = await state.get_data()
+            pair_no = int(info["pair_no"])
+            await pair_service.update_remove_text(call.from_user.id, pair_no, [])
+            runtime_manager.clear_cache()
+            await _finish_with_main_menu(call, state, language, t(language, "remove_text_saved"))
+            return
 
     if data.startswith("add_post:") and current_state == AddPairStates.waiting_post_rule.state:
         value = data.split(":", 1)[1]
@@ -941,46 +1095,47 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
         )
         return
 
-    if data.startswith("add_remove_url:") and current_state == AddPairStates.waiting_remove_url_rule.state:
-        value = data.split(":", 1)[1]
-        await state.update_data(remove_url_rule=(value == "on"))
+if data.startswith("add_remove_url:") and current_state == AddPairStates.waiting_remove_url_rule.state:
+    value = data.split(":", 1)[1]
+    await state.update_data(remove_url_rule=(value == "on"))
 
-        info = await state.get_data()
-        scan = "all" if info["scan_count"] is None else str(info["scan_count"])
-        summary = (
-            f"{t(language, 'pair_summary_title')}\n"
-            f"#{info['pair_no']}\n"
-            f"{t(language, 'summary_source')}: {info['source_input']}\n"
-            f"{t(language, 'summary_scan')}: {scan}\n"
-            f"{t(language, 'summary_target')}: {info['target_input']}\n"
-            f"{t(language, 'summary_ads')}: {', '.join(info['ads']) or '-'}\n"
-            f"{t(language, 'summary_post_rule')}: {'ON' if info['post_rule'] else 'OFF'}\n"
-            f"{t(language, 'summary_forward_rule')}: {'ON' if info['forward_rule'] else 'OFF'}\n"
-            f"{t(language, 'summary_remove_url_rule')}: {'ON' if info['remove_url_rule'] else 'OFF'}"
-        )
+    await _set_step(
+        state,
+        AddPairStates.waiting_video_post_remove,
+        prompt_key="video_post_remove_prompt",
+        markup_payload={"type": "add_video_post_remove_rule"},
+    )
+    await _show_step(
+        call,
+        state,
+        t(language, "video_post_remove_prompt"),
+        reply_markup=rule_keyboard("add_video_post_remove", language),
+    )
+    return
 
-        warning_text = await _target_admin_warning_text(language, info["target_input"])
-        gate_payload = {
-            "type": "target_admin_gate",
-            "prefix": "add_target_admin",
-            "target_input": info["target_input"],
-            "failed": False,
-        }
+if data.startswith("add_video_post_remove:") and current_state == AddPairStates.waiting_video_post_remove.state:
+    value = data.split(":", 1)[1]
+    await state.update_data(video_post_remove=(value == "on"))
 
-        await _set_step(
-            state,
-            AddPairStates.waiting_confirm,
-            prompt_key="target_prompt",
-            markup_payload=gate_payload,
-            panel_text=warning_text,
-        )
-        await state.update_data(summary_text=summary)
-        await _show_step(
-            call,
-            state,
-            warning_text,
-            reply_markup=target_admin_keyboard("add_target_admin", language),
-        )
+    await _set_step(
+        state,
+        AddPairStates.waiting_remove_text,
+        prompt_key="remove_text_prompt",
+        markup_payload={"type": "add_remove_text_step"},
+    )
+    await _show_step(
+        call,
+        state,
+        t(language, "remove_text_prompt"),
+        reply_markup=skip_text_step_keyboard("add_remove_text", language),
+    )
+    return
+
+if data.startswith("add_remove_text:") and current_state == AddPairStates.waiting_remove_text.state:
+    action = data.split(":", 1)[1]
+    if action == "skip":
+        await state.update_data(remove_text_values=[])
+        await _enter_add_pair_target_admin_gate(call, state, language)
         return
         
 
@@ -1464,7 +1619,7 @@ async def message_router(message: Message, state: FSMContext) -> None:
         await _set_step(state, AdsStates.waiting_action, prompt_key="ads_intro", markup_payload={"type": "ads_actions"}, remember=False)
         await _show_step(message, state, t(language, "ads_intro"), reply_markup=ads_action_keyboard(language), reset_panel=True)
         return
-    if action in {"forward_rule", "post_rule", "remove_url_rule"}:
+    if action in {"forward_rule", "post_rule", "remove_url_rule","video_post_remove"}:
         if action == "forward_rule":
             field_name = "forward_rule"
             prompt_key = "rule_forward_explain"
@@ -1494,7 +1649,25 @@ async def message_router(message: Message, state: FSMContext) -> None:
             reset_panel=True,
         )
         return
-        
+    if action == "remove_text":
+        await state.set_state(RemoveTextStates.waiting_pair)
+        await state.update_data(last_activity=_now_ts(), history=[])
+        pairs = await pair_repo.list_for_user(message.from_user.id)
+        await _set_step(
+            state,
+            RemoveTextStates.waiting_pair,
+            prompt_key="select_pair",
+            markup_payload={"type": "pair_picker", "prefix": "remove_text_pair"},
+            remember=False,
+        )
+        await _show_step(
+            message,
+            state,
+            t(language, "select_pair"),
+            reply_markup=pair_picker("remove_text_pair", pairs, language),
+            reset_panel=True,
+        )
+        return
     if action == "check":
         await state.clear()
         await _set_step(state, CheckStates.waiting_pair, prompt_key="choose_pair_or_all", markup_payload={"type": "pair_picker", "prefix": "check_pair", "include_all": True}, remember=False)
