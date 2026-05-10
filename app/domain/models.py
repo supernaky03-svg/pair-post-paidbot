@@ -42,6 +42,9 @@ class PairRecord:
     keyword_mode: str = "off"
     keyword_values: list[str] = field(default_factory=list)
     ads: list[str] = field(default_factory=list)
+    ads_mode: str = "all"
+    video_post_remove: bool = False
+    remove_text_values: list[str] = field(default_factory=list)
     active: bool = True
     generation: int = 1
 
@@ -84,4 +87,3 @@ class RuntimePairContext:
     source_chat_id: int | None = None
     target_chat_id: int | None = None
     last_sent_grouped_ids: set[int] = field(default_factory=set)
-    
