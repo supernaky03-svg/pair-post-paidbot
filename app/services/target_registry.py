@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.db.repositories import PairRepo, TargetRepo, SourceRepo
+from app.db.repositories import AdsPairRepo, PairRepo, TargetRepo, SourceRepo
 from app.domain.models import PairRecord, TargetRecord
 from app.telegram.entity import (
     describe_target,
@@ -16,6 +16,7 @@ from app.telegram.shared_client import client as shared_client
 class TargetRegistryService:
     def __init__(self) -> None:
         self.targets = TargetRepo()
+        self.ads_pairs = AdsPairRepo()
         self.sources = SourceRepo()
         self.pairs = PairRepo()
 
@@ -49,7 +50,11 @@ class TargetRegistryService:
     
     async def attach_target(self, pair: PairRecord, resolved) -> TargetRecord:
         all_active = await self.pairs.list_all_active()
-        in_use = sum(1 for item in all_active if self._pair_target_key(item) == resolved.target_key)
+        ads_active = await self.ads_pairs.list_all_active()
+        in_use = (
+            sum(1 for item in all_active if self._pair_target_key(item) == resolved.target_key)
+            + sum(1 for item in ads_active if item.target_key == resolved.target_key)
+        )
         target = await self.targets.get(resolved.target_key)
         if not target:
             target = TargetRecord(
@@ -84,7 +89,11 @@ class TargetRegistryService:
         if not target:
             return False
         all_active = await self.pairs.list_all_active()
-        in_use = sum(1 for item in all_active if self._pair_target_key(item) == target_key)
+        ads_active = await self.ads_pairs.list_all_active()
+        in_use = (
+            sum(1 for item in all_active if self._pair_target_key(item) == target_key)
+            + sum(1 for item in ads_active if item.target_key == target_key)
+        )
         target.active_pair_reference_count = in_use
         target.last_verified_at = datetime.now(timezone.utc)
         await self.targets.save(target)
@@ -107,7 +116,8 @@ class TargetRegistryService:
         if ref.target_key in committed_keys:
             return
         all_active = await self.pairs.list_all_active()
-        if any(self._pair_target_key(item) == ref.target_key for item in all_active):
+        ads_active = await self.ads_pairs.list_all_active()
+        if any(self._pair_target_key(item) == ref.target_key for item in all_active) or any(item.target_key == ref.target_key for item in ads_active):
             return
         try:
             entity = await resolve_target(target_input)
@@ -117,6 +127,7 @@ class TargetRegistryService:
 
     async def reconcile_targets_for_current_session(self, session_fingerprint: str) -> list[TargetRecord]:
         all_active = await self.pairs.list_all_active()
+        ads_active = await self.ads_pairs.list_all_active()
         unique: dict[str, str] = {}
         for pair in all_active:
             ref = describe_target(pair.target_input)
@@ -124,6 +135,12 @@ class TargetRegistryService:
             if pair.target_key != ref.target_key:
                 pair.target_key = ref.target_key
                 await self.pairs.save(pair)
+        for pair in ads_active:
+            ref = describe_target(pair.target_input)
+            unique.setdefault(ref.target_key, pair.target_input)
+            if pair.target_key != ref.target_key:
+                pair.target_key = ref.target_key
+                await self.ads_pairs.save(pair)
 
         touched: list[TargetRecord] = []
         for target_key, target_input in unique.items():
@@ -143,9 +160,10 @@ class TargetRegistryService:
                 target.normalized_value = resolved.normalized_value
                 target.invite_hash = resolved.invite_hash
                 target.joined_by_shared_session = resolved.joined_by_shared_session
-                target.active_pair_reference_count = sum(
-                    1 for item in all_active if self._pair_target_key(item) == target_key
-                )
+                target.active_pair_reference_count = (
+    sum(1 for item in all_active if self._pair_target_key(item) == target_key)
+    + sum(1 for item in ads_active if item.target_key == target_key)
+)
                 target.chat_id = resolved.chat_id
                 target.title = resolved.title
                 target.last_verified_at = datetime.now(timezone.utc)
@@ -164,9 +182,10 @@ class TargetRegistryService:
                         normalized_value=ref.normalized_value,
                         invite_hash=ref.invite_hash,
                     )
-                target.active_pair_reference_count = sum(
-                    1 for item in all_active if self._pair_target_key(item) == target_key
-                )
+                target.active_pair_reference_count = (
+    sum(1 for item in all_active if self._pair_target_key(item) == target_key)
+    + sum(1 for item in ads_active if item.target_key == target_key)
+)
                 target.last_verified_at = datetime.now(timezone.utc)
                 target.last_error = str(exc)
                 target.last_session_fingerprint = session_fingerprint

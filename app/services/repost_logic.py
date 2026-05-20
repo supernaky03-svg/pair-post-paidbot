@@ -11,6 +11,7 @@ from telethon.errors.rpcerrorlist import FileReferenceExpiredError, MediaCaption
 from app.core.config import settings
 from app.domain.models import PairRecord
 from app.telegram.safe_ops import (
+    safe_forward_messages,
     safe_get_messages,
     safe_send_album,
     safe_send_file,
@@ -203,13 +204,19 @@ class RuntimeCache:
     def __init__(self) -> None:
         self.source_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self.target_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
-        self.entities: dict[tuple[int, int], dict[str, Any]] = {}
+        self.entities: dict[tuple[Any, ...], dict[str, Any]] = {}
 
     def get_pair_entities(self, user_id: int, pair_no: int) -> dict[str, Any]:
-        return self.entities.setdefault((user_id, pair_no), {"source": None, "target": None})
+        return self.entities.setdefault(("pair", user_id, pair_no), {"source": None, "target": None})
+
+    def get_ads_pair_entities(self, user_id: int, pair_no: int) -> dict[str, Any]:
+        return self.entities.setdefault(("ads", user_id, pair_no), {"source": None, "target": None})
 
     def clear_pair(self, user_id: int, pair_no: int) -> None:
-        self.entities.pop((user_id, pair_no), None)
+        self.entities.pop(("pair", user_id, pair_no), None)
+
+    def clear_ads_pair(self, user_id: int, pair_no: int) -> None:
+        self.entities.pop(("ads", user_id, pair_no), None)
 
     def clear_all(self) -> None:
         self.entities.clear()
@@ -366,6 +373,58 @@ async def send_album(
             )
     else:
         text = build_album_text(pair, album)
+        if text:
+            await _send_long_text(target_entity, text)
+
+async def send_ads_pair_single(source_entity, target_entity, msg: Any) -> None:
+    if is_forwarded(msg):
+        await safe_forward_messages(target_entity, int(msg.id), from_peer=source_entity)
+        return
+
+    if getattr(msg, "media", None):
+        try:
+            await _send_file_with_caption_fallback(target_entity, msg.media, message_text(msg))
+        except FileReferenceExpiredError:
+            fresh = await _refetch_message(source_entity, int(msg.id))
+            if not fresh or not getattr(fresh, "media", None):
+                raise
+            await _send_file_with_caption_fallback(target_entity, fresh.media, message_text(fresh))
+    else:
+        text = message_text(msg)
+        if text:
+            await _send_long_text(target_entity, text)
+
+
+async def send_ads_pair_album(source_entity, target_entity, album: list[Any]) -> None:
+    if not album:
+        return
+
+    if any(is_forwarded(m) for m in album):
+        await safe_forward_messages(
+            target_entity,
+            [int(m.id) for m in album],
+            from_peer=source_entity,
+        )
+        return
+
+    files = [m.media for m in album if getattr(m, "media", None)]
+    captions = [message_text(m) for m in album]
+
+    if files:
+        try:
+            await _send_album_with_caption_fallback(target_entity, files, captions)
+        except FileReferenceExpiredError:
+            fresh_album = await _refetch_album(source_entity, album)
+            fresh_files = [m.media for m in fresh_album if getattr(m, "media", None)]
+            if not fresh_files:
+                raise
+            await _send_album_with_caption_fallback(
+                target_entity,
+                fresh_files,
+                [message_text(m) for m in fresh_album],
+            )
+    else:
+        text = "\n".join(message_text(m) for m in album if message_text(m)).strip()
         if text:
             await _send_long_text(target_entity, text)
 

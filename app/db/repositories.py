@@ -8,7 +8,7 @@ from typing import Any
 from app.core.config import settings
 from app.core.constants import ADS_MODES
 from app.db.connection import execute, fetch_all, fetch_one
-from app.domain.models import PairRecord, SourceRecord, TargetRecord, UserRecord
+from app.domain.models import AdsPairRecord, PairRecord, SourceRecord, TargetRecord, UserRecord
 
 
 def _utcnow() -> datetime:
@@ -331,6 +331,105 @@ class PairRepo:
         await execute(
             "UPDATE pairs SET active = FALSE, updated_at = NOW() WHERE user_id = %s",
             (user_id,),
+        )
+
+class AdsPairRepo:
+    def _row_to_ads_pair(self, row: dict[str, Any]) -> AdsPairRecord:
+        recent = _json_list(row.get("recent_sent_ids"))
+        return AdsPairRecord(
+            user_id=row["user_id"],
+            pair_no=row["pair_no"],
+            source_input=row["source_input"],
+            source_key=row["source_key"],
+            source_kind=row["source_kind"],
+            target_input=row["target_input"],
+            target_key=row.get("target_key"),
+            target_chat_id=row.get("target_chat_id"),
+            target_title=row.get("target_title"),
+            delay_seconds=int(row.get("delay_seconds") or 3600),
+            scan_count=int(row.get("scan_count") or 0),
+            last_processed_id=row.get("last_processed_id") or 0,
+            recent_sent_ids=[int(x) for x in recent if str(x).lstrip("-").isdigit()],
+            next_send_at=row.get("next_send_at"),
+            active=bool(row.get("active", True)),
+            generation=row.get("generation") or 1,
+        )
+
+    async def list_for_user(self, user_id: int, *, active_only: bool = True) -> list[AdsPairRecord]:
+        sql = "SELECT * FROM ads_pairs WHERE user_id = %s"
+        if active_only:
+            sql += " AND active = TRUE"
+        sql += " ORDER BY pair_no"
+        rows = await fetch_all(sql, (user_id,))
+        return [self._row_to_ads_pair(r) for r in rows]
+
+    async def list_all_active(self) -> list[AdsPairRecord]:
+        rows = await fetch_all("SELECT * FROM ads_pairs WHERE active = TRUE ORDER BY user_id, pair_no")
+        return [self._row_to_ads_pair(r) for r in rows]
+
+    async def get(self, user_id: int, pair_no: int) -> AdsPairRecord | None:
+        row = await fetch_one(
+            "SELECT * FROM ads_pairs WHERE user_id = %s AND pair_no = %s ORDER BY active DESC LIMIT 1",
+            (user_id, pair_no),
+        )
+        return self._row_to_ads_pair(row) if row else None
+
+    async def save(self, pair: AdsPairRecord) -> None:
+        await execute(
+            """
+            INSERT INTO ads_pairs (
+                user_id, pair_no, source_input, source_key, source_kind,
+                target_input, target_key, target_chat_id, target_title,
+                delay_seconds, scan_count, last_processed_id, recent_sent_ids,
+                next_send_at, active, generation, updated_at
+            )
+            VALUES (
+                %s, %s, %s, %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s, %s::jsonb,
+                %s, %s, %s, NOW()
+            )
+            ON CONFLICT (user_id, pair_no) DO UPDATE SET
+                source_input = EXCLUDED.source_input,
+                source_key = EXCLUDED.source_key,
+                source_kind = EXCLUDED.source_kind,
+                target_input = EXCLUDED.target_input,
+                target_key = EXCLUDED.target_key,
+                target_chat_id = EXCLUDED.target_chat_id,
+                target_title = EXCLUDED.target_title,
+                delay_seconds = EXCLUDED.delay_seconds,
+                scan_count = EXCLUDED.scan_count,
+                last_processed_id = EXCLUDED.last_processed_id,
+                recent_sent_ids = EXCLUDED.recent_sent_ids,
+                next_send_at = EXCLUDED.next_send_at,
+                active = EXCLUDED.active,
+                generation = EXCLUDED.generation,
+                updated_at = NOW()
+            """,
+            (
+                pair.user_id,
+                pair.pair_no,
+                pair.source_input,
+                pair.source_key,
+                pair.source_kind,
+                pair.target_input,
+                pair.target_key,
+                pair.target_chat_id,
+                pair.target_title,
+                pair.delay_seconds,
+                pair.scan_count,
+                pair.last_processed_id,
+                json.dumps(pair.recent_sent_ids[-settings.recent_ids_limit :]),
+                pair.next_send_at,
+                pair.active,
+                pair.generation,
+            ),
+        )
+
+    async def deactivate(self, user_id: int, pair_no: int) -> None:
+        await execute(
+            "UPDATE ads_pairs SET active = FALSE, updated_at = NOW() WHERE user_id = %s AND pair_no = %s",
+            (user_id, pair_no),
         )
 
 

@@ -40,6 +40,7 @@ from app.db.repositories import OtpRepo, PairRepo, SettingsRepo, SourceRepo, Use
 from app.domain.models import PairRecord
 from app.i18n.translator import t
 from app.services.access import AccessService
+from app.services.ads_pair import AdsPairService
 from app.services.pair import PairService
 from app.services.runtime import RuntimeManager
 from app.services.tutorial import build_tutorial
@@ -49,6 +50,7 @@ from app.telegram.shared_client import client as shared_client
 router = Router()
 runtime_manager = RuntimeManager()
 access_service = AccessService()
+ads_pair_service = AdsPairService()
 pair_service = PairService()
 pair_repo = PairRepo()
 user_repo = UserRepo()
@@ -124,6 +126,26 @@ def _ads_mode_label(mode: str | None) -> str:
 
 def _remove_text_label(values: list[str] | None) -> str:
     return ", ".join(values or []) or "-"
+
+
+def _is_delay_token(value: str) -> bool:
+    return bool(re.fullmatch(r"\d+[hm]", (value or "").strip().lower()))
+
+
+def _is_int_token(value: str) -> bool:
+    return bool(re.fullmatch(r"\d+", (value or "").strip()))
+
+
+def _ads_pair_usage() -> str:
+    return (
+        "Usage:\n"
+        "/Addpair ads <pair_no> [delay] [scan_count] <source_link> <target_link>\n"
+        "Examples:\n"
+        "/Addpair ads 1 https://t.me/source https://t.me/target\n"
+        "/Addpair ads 1 1h 50 https://t.me/source https://t.me/target\n"
+        "/Delay ads <pair_no> <1h/1m>\n"
+        "/Delete ads <pair_no>"
+    )
 
 
 def _pair_line(pair: PairRecord) -> str:
@@ -915,6 +937,111 @@ async def admin_joined_sources(message: Message) -> None:
         await message.answer(t(settings.language_default, "joined_sources_empty"))
         return
     await message.answer("\n".join(f"{item.source_input} | refs={item.active_pair_reference_count}" for item in items))
+
+@router.message(Command("Addpair", "addpair"))
+async def ads_pair_add_command(message: Message, state: FSMContext) -> None:
+    user = await _ensure_access_message(message, state)
+    if not user:
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) < 5 or parts[1].lower() != "ads":
+        await message.answer(_ads_pair_usage())
+        return
+
+    try:
+        pair_no = int(parts[2])
+    except ValueError:
+        await message.answer("Ads pair number မှားနေပါတယ်။")
+        return
+
+    idx = 3
+    delay_seconds = ads_pair_service.parse_delay_seconds("1h")
+    scan_count = 0
+
+    try:
+        if idx < len(parts) and _is_delay_token(parts[idx]):
+            delay_seconds = ads_pair_service.parse_delay_seconds(parts[idx])
+            idx += 1
+
+        if idx < len(parts) and _is_int_token(parts[idx]):
+            scan_count = ads_pair_service.parse_scan_count(parts[idx])
+            idx += 1
+
+        if len(parts) - idx != 2:
+            await message.answer(_ads_pair_usage())
+            return
+
+        source_input = parts[idx]
+        target_input = parts[idx + 1]
+
+        pair = await ads_pair_service.create_ads_pair(
+            user_id=message.from_user.id,
+            pair_no=pair_no,
+            delay_seconds=delay_seconds,
+            scan_count=scan_count,
+            source_input=source_input,
+            target_input=target_input,
+        )
+    except Exception as exc:
+        await message.answer(str(exc))
+        return
+
+    await message.answer(
+        "Ads Pair ဖန်တီးပြီးပါပြီ။\n"
+        f"Ads Pair #{pair.pair_no}\n"
+        f"Delay: {ads_pair_service.format_delay(pair.delay_seconds)}\n"
+        f"Scan count: {pair.scan_count}\n"
+        f"Source: {pair.source_input}\n"
+        f"Target: {pair.target_input}"
+    )
+
+
+@router.message(Command("Delay", "delay"))
+async def ads_pair_delay_command(message: Message, state: FSMContext) -> None:
+    user = await _ensure_access_message(message, state)
+    if not user:
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) != 4 or parts[1].lower() != "ads":
+        await message.answer("Usage: /Delay ads <pair_no> <1h/1m>")
+        return
+
+    try:
+        pair_no = int(parts[2])
+        delay_seconds = ads_pair_service.parse_delay_seconds(parts[3])
+        pair = await ads_pair_service.update_delay(message.from_user.id, pair_no, delay_seconds)
+    except Exception as exc:
+        await message.answer(str(exc))
+        return
+
+    await message.answer(
+        f"Ads Pair #{pair.pair_no} delay ကို "
+        f"{ads_pair_service.format_delay(pair.delay_seconds)} ပြောင်းပြီးပါပြီ။"
+    )
+
+
+@router.message(Command("Delete", "delete"))
+async def ads_pair_delete_command(message: Message, state: FSMContext) -> None:
+    user = await _ensure_access_message(message, state)
+    if not user:
+        return
+
+    parts = (message.text or "").split()
+    if len(parts) != 3 or parts[1].lower() != "ads":
+        await message.answer("Usage: /Delete ads <pair_no>")
+        return
+
+    try:
+        pair_no = int(parts[2])
+        pair = await ads_pair_service.delete_ads_pair(message.from_user.id, pair_no)
+    except Exception as exc:
+        await message.answer(str(exc))
+        return
+
+    await message.answer(f"Ads Pair #{pair.pair_no} ဖျက်ပြီးပါပြီ။")
+
 
 @router.message(AddPairStates.waiting_remove_text)
 async def add_pair_remove_text(message: Message, state: FSMContext) -> None:

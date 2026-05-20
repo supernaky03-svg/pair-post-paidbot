@@ -50,6 +50,26 @@ class PairRecord:
 
 
 @dataclass(slots=True)
+class AdsPairRecord:
+    user_id: int
+    pair_no: int
+    source_input: str
+    source_key: str
+    source_kind: str
+    target_input: str
+    target_key: str | None = None
+    target_chat_id: int | None = None
+    target_title: str | None = None
+    delay_seconds: int = 3600
+    scan_count: int = 0
+    last_processed_id: int = 0
+    recent_sent_ids: list[int] = field(default_factory=list)
+    next_send_at: datetime | None = None
+    active: bool = True
+    generation: int = 1
+    
+
+@dataclass(slots=True)
 class SourceRecord:
     source_key: str
     source_input: str

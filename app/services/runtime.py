@@ -2,17 +2,20 @@ from __future__ import annotations
 
 import asyncio
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 
 from telethon.errors.rpcerrorlist import ChatWriteForbiddenError
 
 from app.core.logging import logger
-from app.db.repositories import PairRepo
-from app.domain.models import PairRecord
+from app.db.repositories import AdsPairRepo, PairRepo
+from app.domain.models import AdsPairRecord, PairRecord
 from app.services.repost_logic import (
     collect_grouped_messages,
     is_duplicate,
     is_video_message,
     runtime_cache,
+    send_ads_pair_album,
+    send_ads_pair_single,
     send_album,
     send_single,
     should_process_album,
@@ -27,6 +30,7 @@ from app.telegram.shared_client import client
 class RuntimeManager:
     def __init__(self) -> None:
         self.pairs = PairRepo()
+        self.ads_pairs = AdsPairRepo()
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._active_checks: dict[str, int] = defaultdict(int)
@@ -93,6 +97,19 @@ class RuntimeManager:
                     pair.target_input,
                 )
 
+        ads_pairs = await self.ads_pairs.list_all_active()
+        for pair in ads_pairs:
+            try:
+                await self.scan_ads_pair(pair)
+            except Exception:
+                logger.exception(
+                    "Ads pair scan failed for user_id=%s pair_no=%s source=%s target=%s",
+                    pair.user_id,
+                    pair.pair_no,
+                    pair.source_input,
+                    pair.target_input,
+                )
+                
     async def _ensure_entities(self, pair: PairRecord):
         cache = runtime_cache.get_pair_entities(pair.user_id, pair.pair_no)
         
@@ -104,6 +121,98 @@ class RuntimeManager:
             
         return cache["source"], cache["target"]
 
+    async def _ensure_ads_entities(self, pair: AdsPairRecord):
+        cache = runtime_cache.get_ads_pair_entities(pair.user_id, pair.pair_no)
+
+        if cache["source"] is None:
+            cache["source"] = (await resolve_source(pair.source_input)).entity
+
+        if cache["target"] is None:
+            cache["target"] = (await resolve_and_join_target(pair.target_input)).entity
+
+        return cache["source"], cache["target"]
+
+    async def _collect_ads_messages(self, pair: AdsPairRecord, source_entity):
+        last_id = int(pair.last_processed_id or 0)
+        if last_id == 0:
+            if pair.scan_count <= 0:
+                latest = await safe_get_messages(source_entity, limit=1)
+                if latest:
+                    latest_msg = latest[0] if isinstance(latest, list) else latest
+                    pair.last_processed_id = int(latest_msg.id)
+                    await self.ads_pairs.save(pair)
+                return []
+            latest = await safe_get_messages(source_entity, limit=pair.scan_count)
+            return sorted([m for m in latest], key=lambda x: x.id)
+
+        msgs = []
+        async for msg in client.iter_messages(
+            source_entity,
+            min_id=last_id,
+            reverse=True,
+        ):
+            msgs.append(msg)
+        return msgs
+
+    def _ads_pair_due(self, pair: AdsPairRecord) -> bool:
+        if pair.next_send_at is None:
+            return True
+        next_send_at = pair.next_send_at
+        if next_send_at.tzinfo is None:
+            next_send_at = next_send_at.replace(tzinfo=timezone.utc)
+        return datetime.now(timezone.utc) >= next_send_at
+
+    async def scan_ads_pair(self, pair: AdsPairRecord) -> None:
+        if not self._ads_pair_due(pair):
+            return
+
+        source_lock = runtime_cache.source_locks[pair.source_key]
+        async with source_lock:
+            source_entity, target_entity = await self._ensure_ads_entities(pair)
+            msgs = await self._collect_ads_messages(pair, source_entity)
+            await self._process_ads_messages(pair, source_entity, target_entity, msgs)
+
+    async def _process_ads_messages(self, pair: AdsPairRecord, source_entity, target_entity, msgs) -> None:
+        target_key = f"ads:{pair.target_chat_id or pair.target_input}"
+        target_lock = runtime_cache.target_locks[target_key]
+        grouped_seen: set[int] = set()
+
+        async with target_lock:
+            for msg in msgs:
+                grouped_id = getattr(msg, "grouped_id", None)
+                if grouped_id:
+                    if grouped_id in grouped_seen:
+                        continue
+                    grouped_seen.add(grouped_id)
+                    album = await collect_grouped_messages(source_entity, msg)
+                    if not album:
+                        continue
+                    ids = [int(m.id) for m in album]
+                    if any(mid in set(pair.recent_sent_ids) for mid in ids):
+                        pair.last_processed_id = max(pair.last_processed_id, max(ids))
+                        await self.ads_pairs.save(pair)
+                        continue
+
+                    await send_ads_pair_album(source_entity, target_entity, album)
+                    pair.recent_sent_ids = (pair.recent_sent_ids + ids)[-200:]
+                    pair.last_processed_id = max(pair.last_processed_id, max(ids))
+                    pair.next_send_at = datetime.now(timezone.utc) + timedelta(seconds=pair.delay_seconds)
+                    await self.ads_pairs.save(pair)
+                    return
+
+                msg_id = int(msg.id)
+                if msg_id in set(pair.recent_sent_ids):
+                    pair.last_processed_id = max(pair.last_processed_id, msg_id)
+                    await self.ads_pairs.save(pair)
+                    continue
+
+                await send_ads_pair_single(source_entity, target_entity, msg)
+                pair.recent_sent_ids = (pair.recent_sent_ids + [msg_id])[-200:]
+                pair.last_processed_id = max(pair.last_processed_id, msg_id)
+                pair.next_send_at = datetime.now(timezone.utc) + timedelta(seconds=pair.delay_seconds)
+                await self.ads_pairs.save(pair)
+                return
+    
     async def _collect_messages(self, pair: PairRecord, source_entity):
         last_id = int(pair.last_processed_id or 0)
         if last_id == 0:

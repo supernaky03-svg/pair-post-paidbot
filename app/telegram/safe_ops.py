@@ -31,3 +31,8 @@ async def safe_send_album(entity, files: Iterable[Any], captions: list[str] | No
 async def safe_get_entity(peer):
     from app.telegram.shared_client import client
     return await with_floodwait(client.get_entity, peer)
+
+
+async def safe_forward_messages(entity, messages, *, from_peer=None):
+    from app.telegram.shared_client import client
+    return await with_floodwait(client.forward_messages, entity, messages, from_peer=from_peer)

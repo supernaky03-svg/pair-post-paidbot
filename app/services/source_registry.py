@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from app.db.repositories import PairRepo, SourceRepo
+from app.db.repositories import AdsPairRepo, PairRepo, SourceRepo
 from app.domain.models import PairRecord, SourceRecord
 from app.telegram.entity import leave_source, resolve_source
 
@@ -10,11 +10,16 @@ from app.telegram.entity import leave_source, resolve_source
 class SourceRegistryService:
     def __init__(self) -> None:
         self.sources = SourceRepo()
+        self.ads_pairs = AdsPairRepo()
         self.pairs = PairRepo()
 
     async def attach_source(self, pair: PairRecord, resolved) -> SourceRecord:
         all_active = await self.pairs.list_all_active()
-        in_use = sum(1 for item in all_active if item.source_key == resolved.source_key)
+        ads_active = await self.ads_pairs.list_all_active()
+        in_use = (
+            sum(1 for item in all_active if item.source_key == resolved.source_key)
+            + sum(1 for item in ads_active if item.source_key == resolved.source_key)
+        )
         source = await self.sources.get(resolved.source_key)
         if not source:
             source = SourceRecord(
@@ -49,7 +54,11 @@ class SourceRegistryService:
         if not source:
             return False
         all_active = await self.pairs.list_all_active()
-        in_use = sum(1 for item in all_active if item.source_key == source_key)
+        ads_active = await self.ads_pairs.list_all_active()
+        in_use = (
+            sum(1 for item in all_active if item.source_key == source_key)
+            + sum(1 for item in ads_active if item.source_key == source_key)
+        )
         source.active_pair_reference_count = in_use
         source.last_verified_at = datetime.now(timezone.utc)
         await self.sources.save(source)
@@ -63,7 +72,8 @@ class SourceRegistryService:
     async def rejoin_private_sources_for_current_session(self) -> list[str]:
         touched: list[str] = []
         all_active = await self.pairs.list_all_active()
-        active_keys = {item.source_key for item in all_active}
+        ads_active = await self.ads_pairs.list_all_active()
+        active_keys = {item.source_key for item in all_active} | {item.source_key for item in ads_active}
         for source in await self.sources.list_joined_private():
             if source.source_key not in active_keys:
                 continue

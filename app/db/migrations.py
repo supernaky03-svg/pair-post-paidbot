@@ -101,6 +101,28 @@ MIGRATIONS = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY (user_id, pair_no)
     )
+    ""","""
+    CREATE TABLE IF NOT EXISTS ads_pairs (
+        user_id BIGINT NOT NULL,
+        pair_no INTEGER NOT NULL,
+        source_input TEXT NOT NULL,
+        source_key TEXT NOT NULL,
+        source_kind TEXT NOT NULL,
+        target_input TEXT NOT NULL,
+        target_key TEXT,
+        target_chat_id BIGINT,
+        target_title TEXT,
+        delay_seconds INTEGER NOT NULL DEFAULT 3600,
+        scan_count INTEGER NOT NULL DEFAULT 0,
+        last_processed_id BIGINT NOT NULL DEFAULT 0,
+        recent_sent_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        next_send_at TIMESTAMPTZ,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        generation INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY (user_id, pair_no)
+    )
     """,
     "ALTER TABLE pairs ADD COLUMN IF NOT EXISTS target_key TEXT",
     "ALTER TABLE pairs ADD COLUMN IF NOT EXISTS remove_url_rule BOOLEAN NOT NULL DEFAULT TRUE",
