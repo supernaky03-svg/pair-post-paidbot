@@ -121,6 +121,22 @@ async def resolve_source(raw: str) -> ResolvedSource:
     invite_hash = extract_invite_hash(raw)
     if invite_hash:
         try:
+            entity = await safe_get_entity(raw)
+            return ResolvedSource(
+                source_input=raw,
+                source_key=build_source_key(SOURCE_KIND_PRIVATE, invite_hash),
+                source_kind=SOURCE_KIND_PRIVATE,
+                normalized_value=invite_hash,
+                invite_hash=invite_hash,
+                entity=entity,
+                joined_by_shared_session=True,
+                chat_id=getattr(entity, "id", None),
+                title=getattr(entity, "title", None),
+            )
+        except Exception:
+            pass
+
+        try:
             updates = await with_floodwait(client.__call__, ImportChatInviteRequest(invite_hash))
             chat = getattr(updates, "chats", [None])[0]
             entity = await safe_get_entity(chat or raw)
@@ -196,15 +212,19 @@ async def resolve_and_join_target(raw: str) -> ResolvedTarget:
 
     if ref.target_kind == SOURCE_KIND_PRIVATE:
         try:
-            updates = await with_floodwait(client.__call__, ImportChatInviteRequest(ref.invite_hash))
-            chat = getattr(updates, "chats", [None])[0]
-            entity = await safe_get_entity(chat or raw)
-            joined = True
-        except UserAlreadyParticipantError:
             entity = await safe_get_entity(raw)
             joined = True
-        except (InviteHashEmptyError, InviteHashExpiredError, InviteHashInvalidError, InviteRequestSentError) as exc:
-            raise ValidationError(f"Invalid private target invite link: {exc}") from exc
+        except Exception:
+            try:
+                updates = await with_floodwait(client.__call__, ImportChatInviteRequest(ref.invite_hash))
+                chat = getattr(updates, "chats", [None])[0]
+                entity = await safe_get_entity(chat or raw)
+                joined = True
+            except UserAlreadyParticipantError:
+                entity = await safe_get_entity(raw)
+                joined = True
+            except (InviteHashEmptyError, InviteHashExpiredError, InviteHashInvalidError, InviteRequestSentError) as exc:
+                raise ValidationError(f"Invalid private target invite link: {exc}") from exc
     elif ref.target_kind == SOURCE_KIND_PUBLIC:
         try:
             await with_floodwait(client.__call__, JoinChannelRequest(ref.normalized_value))

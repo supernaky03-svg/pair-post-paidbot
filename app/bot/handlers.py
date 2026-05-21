@@ -938,7 +938,7 @@ async def admin_joined_sources(message: Message) -> None:
         return
     await message.answer("\n".join(f"{item.source_input} | refs={item.active_pair_reference_count}" for item in items))
 
-@router.message(Command("Addpair", "addpair"))
+@router.message(Command("Addpair", "addpair"), F.text.regexp(r"^/[Aa]ddpair(?:@\w+)?\s+ads(?:\s|$)"))
 async def ads_pair_add_command(message: Message, state: FSMContext) -> None:
     user = await _ensure_access_message(message, state)
     if not user:
@@ -974,6 +974,18 @@ async def ads_pair_add_command(message: Message, state: FSMContext) -> None:
 
         source_input = parts[idx]
         target_input = parts[idx + 1]
+
+        existing_ads_pair = await ads_pair_service.ads_pairs.get(message.from_user.id, pair_no)
+        if existing_ads_pair and existing_ads_pair.active:
+            await message.answer(
+                f"Ads Pair #{pair_no} ရှိပြီးသားပါ။\n"
+                f"Delay ပြောင်းချင်ရင် /Delay ads {pair_no} 1m သုံးပါ။\n"
+                f"ပြန်ထည့်ချင်ရင် အရင် /Delete ads {pair_no} နဲ့ဖျက်ပါ။"
+            )
+            return
+
+        await message.answer("Ads Pair ကို သိမ်းနေပါတယ်...")
+
 
         pair = await ads_pair_service.create_ads_pair(
             user_id=message.from_user.id,

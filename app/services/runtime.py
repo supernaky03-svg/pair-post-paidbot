@@ -75,6 +75,27 @@ class RuntimeManager:
                 continue
 
     async def scan_all_pairs(self) -> None:
+        ads_pairs = await self.ads_pairs.list_all_active()
+        for pair in ads_pairs:
+            try:
+                await self.scan_ads_pair(pair)
+            except ChatWriteForbiddenError:
+                logger.exception(
+                    "Ads pair target admin required user_id=%s pair_no=%s source=%s target=%s",
+                    pair.user_id,
+                    pair.pair_no,
+                    pair.source_input,
+                    pair.target_input,
+                )
+            except Exception:
+                logger.exception(
+                    "Ads pair scan failed for user_id=%s pair_no=%s source=%s target=%s",
+                    pair.user_id,
+                    pair.pair_no,
+                    pair.source_input,
+                    pair.target_input,
+                )
+
         pairs = await self.pairs.list_all_active()
         for pair in pairs:
             try:
@@ -91,19 +112,6 @@ class RuntimeManager:
             except Exception:
                 logger.exception(
                     "Runtime scan failed for pair user_id=%s pair_no=%s source=%s target=%s",
-                    pair.user_id,
-                    pair.pair_no,
-                    pair.source_input,
-                    pair.target_input,
-                )
-
-        ads_pairs = await self.ads_pairs.list_all_active()
-        for pair in ads_pairs:
-            try:
-                await self.scan_ads_pair(pair)
-            except Exception:
-                logger.exception(
-                    "Ads pair scan failed for user_id=%s pair_no=%s source=%s target=%s",
                     pair.user_id,
                     pair.pair_no,
                     pair.source_input,
