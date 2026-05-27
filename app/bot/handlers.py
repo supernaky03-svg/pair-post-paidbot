@@ -331,6 +331,34 @@ async def _status_text(user_id: int, language: str) -> str:
     return "\n".join(lines)
 
 
+MAX_BOT_MESSAGE_LENGTH = 3900
+
+
+def _split_bot_text(text: str, limit: int = MAX_BOT_MESSAGE_LENGTH) -> list[str]:
+    text = text or ""
+    if len(text) <= limit:
+        return [text]
+
+    chunks: list[str] = []
+    while len(text) > limit:
+        cut = text.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = text.rfind(" ", 0, limit)
+        if cut <= 0:
+            cut = limit
+
+        chunk = text[:cut].strip()
+        if chunk:
+            chunks.append(chunk)
+
+        text = text[cut:].strip()
+
+    if text:
+        chunks.append(text)
+
+    return chunks or [""]
+
+
 async def _send(target: Message | CallbackQuery, text: str, reply_markup=None) -> None:
     if isinstance(target, Message):
         await target.answer(text, reply_markup=reply_markup)
@@ -343,15 +371,25 @@ def _editable_markup(reply_markup) -> bool:
 
 
 async def _create_panel(target: Message | CallbackQuery, text: str, reply_markup=None) -> tuple[int, int]:
-    if isinstance(target, Message):
-        sent = await target.answer(text, reply_markup=reply_markup, disable_web_page_preview=True)
-    else:
-        sent = await target.message.answer(text, reply_markup=reply_markup, disable_web_page_preview=True)
+    chunks = _split_bot_text(text)
+
+    async def _answer(chunk: str, markup=None):
+        if isinstance(target, Message):
+            return await target.answer(chunk, reply_markup=markup, disable_web_page_preview=True)
+        return await target.message.answer(chunk, reply_markup=markup, disable_web_page_preview=True)
+
+    sent = None
+    for chunk in chunks[:-1]:
+        sent = await _answer(chunk, None)
+
+    sent = await _answer(chunks[-1], reply_markup)
     return sent.chat.id, sent.message_id
 
 
 async def _edit_panel(bot, chat_id: int, message_id: int, text: str, reply_markup=None) -> bool:
     if not _editable_markup(reply_markup):
+        return False
+    if len(text or "") > MAX_BOT_MESSAGE_LENGTH:
         return False
     try:
         await bot.edit_message_text(

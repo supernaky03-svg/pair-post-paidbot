@@ -85,6 +85,19 @@ def album_has_video(album: Iterable[Any]) -> bool:
     return any(is_video_message(m) for m in album)
 
 
+def has_sendable_media(msg: Any) -> bool:
+    media = getattr(msg, "media", None)
+    if media is None:
+        return False
+
+    # Telegram link/web page previews are not uploadable media files.
+    # Treat them as text so send_file() will not raise TypeError.
+    if media.__class__.__name__ == "MessageMediaWebPage":
+        return False
+
+    return True
+
+
 def collect_album_text(album: Iterable[Any]) -> str:
     parts = [message_text(m) for m in album if message_text(m)]
     return "\n".join(parts).strip()
@@ -321,13 +334,13 @@ async def _send_album_with_caption_fallback(target_entity, files, captions: list
 
 async def send_single(pair: PairRecord, source_entity, target_entity, msg: Any) -> None:
     await human_delay()
-    if getattr(msg, "media", None):
+    if has_sendable_media(msg):
         caption = build_single_text(pair, msg)
         try:
             await _send_file_with_caption_fallback(target_entity, msg.media, caption)
         except FileReferenceExpiredError:
             fresh = await _refetch_message(source_entity, int(msg.id))
-            if not fresh or not getattr(fresh, "media", None):
+            if not fresh or not has_sendable_media(fresh):
                 raise
             await _send_file_with_caption_fallback(
                 target_entity,
@@ -349,14 +362,14 @@ async def send_album(
     bypass_post_rule: bool = False,
 ) -> None:
     await human_delay()
-    files = [m.media for m in album if getattr(m, "media", None)]
+    files = [m.media for m in album if has_sendable_media(m)]
     captions = build_album_captions(pair, album)
     if files:
         try:
             await _send_album_with_caption_fallback(target_entity, files, captions)
         except FileReferenceExpiredError:
             fresh_album = await _refetch_album(source_entity, album)
-            fresh_files = [m.media for m in fresh_album if getattr(m, "media", None)]
+            fresh_files = [m.media for m in fresh_album if has_sendable_media(m)]
             if not fresh_files:
                 raise
             await _send_album_with_caption_fallback(
