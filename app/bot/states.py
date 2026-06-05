@@ -10,6 +10,7 @@ class AddPairStates(StatesGroup):
     waiting_pair_no = State()
     waiting_source = State()
     waiting_scan = State()
+    waiting_delay = State()
     waiting_target = State()
     waiting_ads = State()
     waiting_ads_mode = State()
@@ -64,6 +65,11 @@ class RuleStates(StatesGroup):
 class RemoveTextStates(StatesGroup):
     waiting_pair = State()
     waiting_values = State()
+
+
+class PairDelayStates(StatesGroup):
+    waiting_pair = State()
+    waiting_value = State()
 
 
 class CheckStates(StatesGroup):

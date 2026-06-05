@@ -10,7 +10,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from app.bot.keyboards import (
-    ads_action_keyboard,ads_mode_keyboard,
+    ads_action_keyboard,
+    ads_mode_keyboard,
     confirm_keyboard,
     hide_reply_keyboard,
     keyword_action_keyboard,
@@ -18,7 +19,8 @@ from app.bot.keyboards import (
     main_menu,
     pair_picker,
     restore_keyboard,
-    rule_keyboard,skip_text_step_keyboard,
+    rule_keyboard,
+    skip_text_step_keyboard,
     target_admin_keyboard,
     text_step_keyboard,
 )
@@ -30,7 +32,9 @@ from app.bot.states import (
     EditSourceStates,
     EditTargetStates,
     KeywordStates,
-    OtpStates,RemoveTextStates,
+    OtpStates,
+    PairDelayStates,
+    RemoveTextStates,
     RuleStates,
 )
 from app.core.config import settings
@@ -63,6 +67,7 @@ STATE_BY_NAME = {
         AddPairStates.waiting_pair_no,
         AddPairStates.waiting_source,
         AddPairStates.waiting_scan,
+        AddPairStates.waiting_delay,
         AddPairStates.waiting_target,
         AddPairStates.waiting_ads,
         AddPairStates.waiting_ads_mode,
@@ -94,6 +99,8 @@ STATE_BY_NAME = {
         AdsStates.waiting_delete_confirm,
         RemoveTextStates.waiting_pair,
         RemoveTextStates.waiting_values,
+        PairDelayStates.waiting_pair,
+        PairDelayStates.waiting_value,
         RuleStates.waiting_pair,
         RuleStates.waiting_value,
         CheckStates.waiting_pair,
@@ -126,13 +133,26 @@ def _remove_text_label(values: list[str] | None) -> str:
     return ", ".join(values or []) or "-"
 
 
+def _delay_label(delay_seconds: int | None) -> str:
+    if delay_seconds is None:
+        return "global"
+    if delay_seconds == 0:
+        return "0s"
+    if delay_seconds % 3600 == 0:
+        return f"{delay_seconds // 3600}h"
+    if delay_seconds % 60 == 0:
+        return f"{delay_seconds // 60}m"
+    return f"{delay_seconds}s"
+
+
 def _pair_line(pair: PairRecord) -> str:
     keyword_values = ", ".join(pair.keyword_values) if pair.keyword_values else "-"
     ads_values = ", ".join(pair.ads) if pair.ads else "-"
     scan = "all" if pair.scan_count is None else str(pair.scan_count)
     return (
         f"#{pair.pair_no} | {pair.source_input} -> {pair.target_input}\n"
-        f"scan={scan} | keywords={pair.keyword_mode}:{keyword_values} | "
+        f"scan={scan} | delay={_delay_label(getattr(pair, 'delay_seconds', None))} | "
+        f"keywords={pair.keyword_mode}:{keyword_values} | "
         f"ads={ads_values} | "
         f"ads_mode={_ads_mode_label(getattr(pair, 'ads_mode', 'all'))} | "
         f"post_rule={'ON' if pair.post_rule else 'OFF'} | "
@@ -170,6 +190,7 @@ def _build_add_pair_summary(language: str, info: dict[str, Any]) -> str:
         f"#{info['pair_no']}\n"
         f"{t(language, 'summary_source')}: {info['source_input']}\n"
         f"{t(language, 'summary_scan')}: {scan}\n"
+        f"{t(language, 'summary_delay')}: {_delay_label(info.get('delay_seconds'))}\n"
         f"{t(language, 'summary_target')}: {info['target_input']}\n"
         f"{t(language, 'summary_ads')}: {', '.join(info.get('ads', [])) or '-'}\n"
         f"{t(language, 'summary_ads_mode')}: {_ads_mode_label(info.get('ads_mode'))}\n"
@@ -510,6 +531,8 @@ async def _render_markup(user_id: int, language: str, payload: dict[str, Any] | 
         return restore_keyboard(language)
     if kind == "flow_nav":
         return text_step_keyboard(payload.get("prefix", "flow"), language)
+    if kind == "skip_step":
+        return skip_text_step_keyboard(payload.get("prefix", "flow"), language)
     if kind == "add_post_rule":
         return rule_keyboard("add_post", language)
     if kind == "add_forward_rule":
@@ -730,6 +753,7 @@ def _menu_action(text: str | None) -> str | None:
         "remove_url_rule": {"remove url rule", "remove url", "url rule","URL ဖျက် Rule"},
         "video_post_remove": {"video post remove", "video remove", "video caption remove","Video Caption ဖျက်"},
         "remove_text": {"remove text", "text remove","စာသားဖျက်"},
+        "pair_delay": {"pair delay", "delay", "delay time", "pair delay ပြင်မယ်", "delay ပြင်မယ်"},
         "contact": {"contact", "ဆက်သွယ်ရန်"},
         "language": {"language", "ဘာသာစကား"},
     }
@@ -1103,6 +1127,47 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
             await _finish_with_main_menu(call, state, language, t(language, "remove_text_saved"))
             return
 
+    if data.startswith("add_delay:") and current_state == AddPairStates.waiting_delay.state:
+        action = data.split(":", 1)[1]
+        if action == "skip":
+            await state.update_data(delay_seconds=None)
+            await _set_step(
+                state,
+                AddPairStates.waiting_target,
+                prompt_key="target_prompt",
+                markup_payload={"type": "flow_nav", "prefix": "flow"},
+            )
+            await _show_step(call, state, t(language, "target_prompt"), reply_markup=text_step_keyboard("flow", language))
+            return
+
+    if data.startswith("pair_delay_pair:") and current_state == PairDelayStates.waiting_pair.state:
+        choice = data.split(":", 1)[1]
+        if choice.isdigit():
+            await state.update_data(pair_no=int(choice))
+            await _set_step(
+                state,
+                PairDelayStates.waiting_value,
+                prompt_key="delay_edit_prompt",
+                markup_payload={"type": "skip_step", "prefix": "pair_delay"},
+            )
+            await _show_step(
+                call,
+                state,
+                t(language, "delay_edit_prompt"),
+                reply_markup=skip_text_step_keyboard("pair_delay", language),
+            )
+            return
+
+    if data.startswith("pair_delay:") and current_state == PairDelayStates.waiting_value.state:
+        action = data.split(":", 1)[1]
+        if action == "skip":
+            info = await state.get_data()
+            pair_no = int(info["pair_no"])
+            await pair_service.update_delay(call.from_user.id, pair_no, None)
+            runtime_manager.clear_cache()
+            await _finish_with_main_menu(call, state, language, t(language, "delay_updated"))
+            return
+
     if data.startswith("add_post:") and current_state == AddPairStates.waiting_post_rule.state:
         value = data.split(":", 1)[1]
         await state.update_data(post_rule=(value == "on"))
@@ -1227,11 +1292,15 @@ async def callback_router(call: CallbackQuery, state: FSMContext) -> None:
                     pair_no=info["pair_no"],
                     source_input=info["source_input"],
                     scan_count=info["scan_count"],
+                    delay_seconds=info.get("delay_seconds"),
                     target_input=info["target_input"],
                     ads=info["ads"],
                     post_rule=info["post_rule"],
                     forward_rule=info["forward_rule"],
-                    remove_url_rule=info["remove_url_rule"]
+                    remove_url_rule=info["remove_url_rule"],
+                    ads_mode=info.get("ads_mode", "all"),
+                    video_post_remove=info.get("video_post_remove", False),
+                    remove_text_values=info.get("remove_text_values", []),
                 )
             except Exception as exc:
                 await _show_step(call, state, f"Create failed: {exc}", reply_markup=None)
@@ -1706,6 +1775,25 @@ async def message_router(message: Message, state: FSMContext) -> None:
             reset_panel=True,
         )
         return
+    if action == "pair_delay":
+        await state.clear()
+        await _remove_main_menu(message)
+        await _set_step(
+            state,
+            PairDelayStates.waiting_pair,
+            prompt_key="delay_intro",
+            markup_payload={"type": "pair_picker", "prefix": "pair_delay_pair", "include_all": False},
+            remember=False,
+        )
+        pairs = await pair_repo.list_for_user(message.from_user.id)
+        await _show_step(
+            message,
+            state,
+            t(language, "delay_intro"),
+            reply_markup=pair_picker("pair_delay_pair", pairs, language),
+            reset_panel=True,
+        )
+        return
     if action == "check":
         await state.clear()
         await _set_step(state, CheckStates.waiting_pair, prompt_key="choose_pair_or_all", markup_payload={"type": "pair_picker", "prefix": "check_pair", "include_all": True}, remember=False)
@@ -1763,6 +1851,33 @@ async def message_router(message: Message, state: FSMContext) -> None:
             await _show_step(message, state, t(language, "invalid_scan"), reply_markup=text_step_keyboard("flow", language))
             return
         await state.update_data(scan_count=scan_count)
+        await _set_step(
+            state,
+            AddPairStates.waiting_delay,
+            prompt_key="delay_prompt",
+            markup_payload={"type": "skip_step", "prefix": "add_delay"},
+        )
+        await _show_step(
+            message,
+            state,
+            t(language, "delay_prompt"),
+            reply_markup=skip_text_step_keyboard("add_delay", language),
+        )
+        return
+
+    if current_state == AddPairStates.waiting_delay.state:
+        await _cleanup_user_message(message)
+        try:
+            delay_seconds = pair_service.parse_delay_seconds(message.text or "")
+        except Exception as exc:
+            await _show_step(
+                message,
+                state,
+                str(exc) or t(language, "invalid_delay"),
+                reply_markup=skip_text_step_keyboard("add_delay", language),
+            )
+            return
+        await state.update_data(delay_seconds=delay_seconds)
         await _set_step(state, AddPairStates.waiting_target, prompt_key="target_prompt", markup_payload={"type": "flow_nav", "prefix": "flow"})
         await _show_step(message, state, t(language, "target_prompt"), reply_markup=text_step_keyboard("flow", language))
         return
@@ -1952,6 +2067,24 @@ async def message_router(message: Message, state: FSMContext) -> None:
             await message.answer(f"Ads update failed: {e}", reply_markup=main_menu(language))
         return
 
+    if current_state == PairDelayStates.waiting_value.state:
+        await _cleanup_user_message(message)
+        info = await state.get_data()
+        try:
+            delay_seconds = pair_service.parse_delay_seconds(message.text or "")
+            await pair_service.update_delay(message.from_user.id, int(info["pair_no"]), delay_seconds)
+        except Exception as exc:
+            await _show_step(
+                message,
+                state,
+                str(exc) or t(language, "invalid_delay"),
+                reply_markup=skip_text_step_keyboard("pair_delay", language),
+            )
+            return
+        runtime_manager.clear_cache()
+        await _finish_with_main_menu(message, state, language, t(language, "delay_updated"))
+        return
+
     callback_only_states = {
         OtpStates.waiting_restore_choice.state,
         AddPairStates.waiting_post_rule.state,
@@ -1966,6 +2099,7 @@ async def message_router(message: Message, state: FSMContext) -> None:
         AdsStates.waiting_pair_for_add.state,
         AdsStates.waiting_pair_for_delete.state,
         AdsStates.waiting_delete_confirm.state,
+        PairDelayStates.waiting_pair.state,
         RuleStates.waiting_pair.state,
         RuleStates.waiting_value.state,
         CheckStates.waiting_pair.state,

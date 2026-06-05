@@ -77,6 +77,46 @@ class PairService:
             raise ValidationError("Scan amount must be a positive number or all.")
         return value
 
+    def parse_delay_seconds(self, raw: str) -> int | None:
+        value = raw.strip().lower()
+        if value in {"", "skip", "default", "global", "none", "-"}:
+            return None
+
+        multiplier = 1
+        if value.endswith("sec"):
+            value = value[:-3].strip()
+        elif value.endswith("seconds"):
+            value = value[:-7].strip()
+        elif value.endswith("s"):
+            value = value[:-1].strip()
+        elif value.endswith("min"):
+            value = value[:-3].strip()
+            multiplier = 60
+        elif value.endswith("minutes"):
+            value = value[:-7].strip()
+            multiplier = 60
+        elif value.endswith("m"):
+            value = value[:-1].strip()
+            multiplier = 60
+        elif value.endswith("hours"):
+            value = value[:-5].strip()
+            multiplier = 3600
+        elif value.endswith("hour"):
+            value = value[:-4].strip()
+            multiplier = 3600
+        elif value.endswith("h"):
+            value = value[:-1].strip()
+            multiplier = 3600
+
+        try:
+            seconds = int(value) * multiplier
+        except ValueError as exc:
+            raise ValidationError("Delay must be skip/default or a time like 0, 5, 30s, 1m, 2h.") from exc
+
+        if seconds < 0:
+            raise ValidationError("Delay cannot be negative.")
+        return seconds
+
     def normalize_keywords(self, raw: str) -> list[str]:
         return sorted({part.strip().lower() for part in raw.split(",") if part.strip()})
 
@@ -138,6 +178,7 @@ class PairService:
         ads: list[str],
         post_rule: bool,
         forward_rule: bool,
+        delay_seconds: int | None = None,
         remove_url_rule: bool = True,
         ads_mode: str = "all",
         video_post_remove: bool = False,
@@ -165,6 +206,7 @@ class PairService:
             target_chat_id=resolved_target.chat_id,
             target_title=resolved_target.title,
             scan_count=scan_count,
+            delay_seconds=delay_seconds,
             forward_rule=forward_rule,
             remove_url_rule=remove_url_rule,
             post_rule=post_rule,
@@ -320,6 +362,19 @@ class PairService:
         if not pair or not pair.active:
             raise ValidationError("Pair not found.")
         pair.remove_text_values = values
+        await self.pairs.save(pair)
+        return pair
+
+    async def update_delay(
+        self,
+        user_id: int,
+        pair_no: int,
+        delay_seconds: int | None,
+    ) -> PairRecord:
+        pair = await self.pairs.get(user_id, pair_no)
+        if not pair or not pair.active:
+            raise ValidationError("Pair not found.")
+        pair.delay_seconds = delay_seconds
         await self.pairs.save(pair)
         return pair
 

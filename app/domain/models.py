@@ -34,6 +34,7 @@ class PairRecord:
     target_chat_id: int | None = None
     target_title: str | None = None
     scan_count: int | None = 100
+    delay_seconds: int | None = None
     last_processed_id: int = 0
     recent_sent_ids: list[int] = field(default_factory=list)
     forward_rule: bool = False

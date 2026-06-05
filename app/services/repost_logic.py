@@ -231,7 +231,12 @@ class RuntimeCache:
 runtime_cache = RuntimeCache()
 
 
-async def human_delay() -> None:
+async def human_delay(pair: PairRecord) -> None:
+    if pair.delay_seconds is not None:
+        if pair.delay_seconds > 0:
+            await asyncio.sleep(pair.delay_seconds)
+        return
+
     low = min(settings.delay_min_seconds, settings.delay_max_seconds)
     high = max(settings.delay_min_seconds, settings.delay_max_seconds)
     if high <= 0:
@@ -333,7 +338,7 @@ async def _send_album_with_caption_fallback(target_entity, files, captions: list
 
 
 async def send_single(pair: PairRecord, source_entity, target_entity, msg: Any) -> None:
-    await human_delay()
+    await human_delay(pair)
     if has_sendable_media(msg):
         caption = build_single_text(pair, msg)
         try:
@@ -361,7 +366,7 @@ async def send_album(
     *,
     bypass_post_rule: bool = False,
 ) -> None:
-    await human_delay()
+    await human_delay(pair)
     files = [m.media for m in album if has_sendable_media(m)]
     captions = build_album_captions(pair, album)
     if files:

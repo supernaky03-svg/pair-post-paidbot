@@ -32,15 +32,15 @@ def main_menu(language: str) -> ReplyKeyboardMarkup:
                 KeyboardButton(text=t(language, "menu_forward_rule")),
                 KeyboardButton(text=t(language, "menu_post_rule")),
                 KeyboardButton(text=t(language, "menu_remove_url_rule")),
+                KeyboardButton(text=t(language, "menu_pair_delay")),
+            ],
+            [
+                KeyboardButton(text=t(language, "menu_contact")),
+            ],
+            [
                 KeyboardButton(text=t(language, "menu_check")),
-            ],
-            [
-                
-            ],
-            [
                 KeyboardButton(text=t(language, "menu_video_post_remove")),
                 KeyboardButton(text=t(language, "menu_remove_text")),
-                KeyboardButton(text=t(language, "menu_contact")),
                 KeyboardButton(text=t(language, "menu_language")),
             ],
         ],

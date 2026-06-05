@@ -84,6 +84,7 @@ MIGRATIONS = [
         target_chat_id BIGINT,
         target_title TEXT,
         scan_count INTEGER,
+        delay_seconds INTEGER,
         last_processed_id BIGINT NOT NULL DEFAULT 0,
         recent_sent_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
         forward_rule BOOLEAN NOT NULL DEFAULT FALSE,
@@ -103,6 +104,7 @@ MIGRATIONS = [
     )
     """,
     "ALTER TABLE pairs ADD COLUMN IF NOT EXISTS target_key TEXT",
+    "ALTER TABLE pairs ADD COLUMN IF NOT EXISTS delay_seconds INTEGER",
     "ALTER TABLE pairs ADD COLUMN IF NOT EXISTS remove_url_rule BOOLEAN NOT NULL DEFAULT TRUE",
     "ALTER TABLE pairs ADD COLUMN IF NOT EXISTS ads_mode TEXT NOT NULL DEFAULT 'all'",
     "ALTER TABLE pairs ADD COLUMN IF NOT EXISTS video_post_remove BOOLEAN NOT NULL DEFAULT FALSE",
