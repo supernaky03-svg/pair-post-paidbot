@@ -32,6 +32,7 @@ class RuntimeManager:
         self._active_checks: dict[str, int] = defaultdict(int)
         self._bot = None
         self.notifier = TargetAdminNotifier()
+        self._pair_tasks: dict[tuple[int, int], asyncio.Task] = {}
 
     async def start(self, bot=None) -> None:
         if self._task and not self._task.done():
@@ -42,6 +43,12 @@ class RuntimeManager:
 
     async def stop(self) -> None:
         self._stop.set()
+        for task in list(self._pair_tasks.values()):
+            if not task.done():
+                task.cancel()
+        if self._pair_tasks:
+            await asyncio.gather(*self._pair_tasks.values(), return_exceptions=True)
+            self._pair_tasks.clear()
         if self._task:
             await self._task
 
@@ -72,26 +79,45 @@ class RuntimeManager:
 
     async def scan_all_pairs(self) -> None:
         pairs = await self.pairs.list_all_active()
+        active_keys = {(pair.user_id, pair.pair_no) for pair in pairs}
+
+        for key, task in list(self._pair_tasks.items()):
+            if key not in active_keys:
+                if not task.done():
+                    task.cancel()
+                self._pair_tasks.pop(key, None)
+            elif task.done():
+                self._pair_tasks.pop(key, None)
+
         for pair in pairs:
-            try:
-                await self.scan_pair(pair)
-            except ChatWriteForbiddenError:
-                await self._notify_target_admin_required(pair)
-                logger.exception(
-                    "Runtime scan failed for pair user_id=%s pair_no=%s source=%s target=%s",
-                    pair.user_id,
-                    pair.pair_no,
-                    pair.source_input,
-                    pair.target_input,
-                )
-            except Exception:
-                logger.exception(
-                    "Runtime scan failed for pair user_id=%s pair_no=%s source=%s target=%s",
-                    pair.user_id,
-                    pair.pair_no,
-                    pair.source_input,
-                    pair.target_input,
-                )
+            key = (pair.user_id, pair.pair_no)
+            task = self._pair_tasks.get(key)
+            if task and not task.done():
+                continue
+            self._pair_tasks[key] = asyncio.create_task(self._scan_pair_safe(pair))
+
+    async def _scan_pair_safe(self, pair: PairRecord) -> None:
+        try:
+            await self.scan_pair(pair)
+        except asyncio.CancelledError:
+            raise
+        except ChatWriteForbiddenError:
+            await self._notify_target_admin_required(pair)
+            logger.exception(
+                "Runtime scan failed for pair user_id=%s pair_no=%s source=%s target=%s",
+                pair.user_id,
+                pair.pair_no,
+                pair.source_input,
+                pair.target_input,
+            )
+        except Exception:
+            logger.exception(
+                "Runtime scan failed for pair user_id=%s pair_no=%s source=%s target=%s",
+                pair.user_id,
+                pair.pair_no,
+                pair.source_input,
+                pair.target_input,
+            )
 
     async def _ensure_entities(self, pair: PairRecord):
         cache = runtime_cache.get_pair_entities(pair.user_id, pair.pair_no)
@@ -126,7 +152,7 @@ class RuntimeManager:
             async with source_lock:
                 source_entity, target_entity = await self._ensure_entities(pair)
                 msgs = await self._collect_messages(pair, source_entity)
-                await self._process_messages(pair, source_entity, target_entity, msgs)
+            await self._process_messages(pair, source_entity, target_entity, msgs)
         finally:
             self._active_checks[pair.source_key] = max(
                 0,
